@@ -1,5 +1,5 @@
 const WORLD_W = 1600, WORLD_H = 1200;
-const CW = 900, CH = 620;
+let CW = window.innerWidth, CH = window.innerHeight;
 function hsla(c, a) { return c.replace('hsl(', 'hsla(').replace(')', `,${a})`); }
 function lerp(a, b, t) { return a + (b - a) * Math.max(0, Math.min(1, t)); }
 function lerpAngle(a, b, t) {
@@ -22,9 +22,19 @@ let dashCooldown = 0, shieldCooldown = 0, shieldActive = false;
 let myAmmo = 10;
 const killFeed = [];
 
-// ── Canvas ────────────────────────────────────────────────────
+// ── Canvas (fullscreen) ───────────────────────────────────────
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+let pointerLocked = false;
+
+function resizeCanvas() {
+  CW = window.innerWidth;
+  CH = window.innerHeight;
+  canvas.width = CW;
+  canvas.height = CH;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
 // ── Title screen ──────────────────────────────────────────────
 const bgCanvas = document.getElementById('bg');
@@ -176,29 +186,34 @@ document.addEventListener('keyup', e => {
   if (e.key === 'd' || e.key === 'ArrowRight') keys.right = false;
   if (e.key === 'f' || e.key === 'F') { kame.held = false; if (!kame.firing) kame.charge = 0; }
 });
-canvas.addEventListener('mousemove', e => {
-  const r = canvas.getBoundingClientRect();
-  mouseX = e.clientX - r.left; mouseY = e.clientY - r.top;
+
+// Pointer lock — mouse captured, movement rotates camera
+const SENSITIVITY = 0.0025;
+canvas.addEventListener('click', () => { if (gameActive) canvas.requestPointerLock(); });
+document.addEventListener('pointerlockchange', () => {
+  pointerLocked = document.pointerLockElement === canvas;
 });
-canvas.addEventListener('contextmenu', e => {
-  e.preventDefault();
-  if (!gameActive || !myId || !serverState) return;
+document.addEventListener('mousemove', e => {
+  if (!gameActive || !pointerLocked) return;
+  worldAngle += e.movementX * SENSITIVITY;
+});
+
+// Right-click to throw (works in pointer lock)
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 2 || !gameActive || !myId || !serverState) return;
   const me = serverState.players.find(p => p.id === myId);
   if (me && me.alive && me.ready && hand.state === 'idle' && myAmmo > 0) {
     hand.state = 'windup'; hand.timer = 0; hand.rockSent = false;
   }
 });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
 
 // ── Game loop ─────────────────────────────────────────────────
 setInterval(() => {
   if (!myId || !gameActive) return;
 
-  // Mouse angle from player screen center
-  const sx = CW / 2, sy = CH / 2;
-  mouseAngle = Math.atan2(mouseY - sy, mouseX - sx);
-  worldAngle = mouseAngle; // world rotates instantly with mouse
-
-  socket.emit('input', { keys, angle: mouseAngle });
+  mouseAngle = worldAngle;
+  socket.emit('input', { keys, angle: worldAngle });
 
   // Kamehameha
   if (kame.held && kame.cooldown === 0 && !kame.firing) {
@@ -462,14 +477,27 @@ function drawHand() {
 }
 
 function drawCursor() {
-  const s = 11;
-  ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5;
+  const cx = CW / 2, cy = CH / 2, s = 12, gap = 4;
+  ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(mouseX - s, mouseY); ctx.lineTo(mouseX + s, mouseY);
-  ctx.moveTo(mouseX, mouseY - s); ctx.lineTo(mouseX, mouseY + s);
+  ctx.moveTo(cx - s, cy); ctx.lineTo(cx - gap, cy);
+  ctx.moveTo(cx + gap, cy); ctx.lineTo(cx + s, cy);
+  ctx.moveTo(cx, cy - s); ctx.lineTo(cx, cy - gap);
+  ctx.moveTo(cx, cy + gap); ctx.lineTo(cx, cy + s);
   ctx.stroke();
-  ctx.beginPath(); ctx.arc(mouseX, mouseY, 4, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
   ctx.restore();
+
+  // Click to capture prompt
+  if (!pointerLocked) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    roundRect(ctx, CW/2 - 130, CH/2 - 22, 260, 40, 10); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('Click to capture mouse & play', CW/2, CH/2 + 5);
+    ctx.restore();
+  }
 }
 
 function roundRect(c, x, y, w, h, r) {
@@ -593,6 +621,7 @@ function showEnd(title, sub) {
     document.getElementById('overlay').style.display = 'none';
     document.getElementById('game').style.display = 'none';
     document.getElementById('lobby').style.display = 'block';
+    if (document.pointerLockElement) document.exitPointerLock();
     myId = null; serverState = null; gameActive = false; gameOverFlag = false;
     obstacles = []; killFeed.length = 0;
     hand.state = 'idle'; hand.timer = 0;

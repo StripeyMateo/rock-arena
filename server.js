@@ -153,11 +153,16 @@ io.on('connection', (socket) => {
     const p = lobbies[lobbyId].players[id];
     if (!p || !p.alive || p.dashCooldown > 0) return;
     p.dashCooldown = DASH_COOLDOWN;
-    const dx = (p.keys.right ? 1 : 0) - (p.keys.left ? 1 : 0);
-    const dy = (p.keys.down ? 1 : 0) - (p.keys.up ? 1 : 0);
-    const len = Math.hypot(dx, dy) || 1;
-    p.vx = (dx / len) * DASH_FORCE;
-    p.vy = (dy / len) * DASH_FORCE;
+    const fwdX = Math.cos(p.angle), fwdY = Math.sin(p.angle);
+    const lefX = Math.sin(p.angle), lefY = -Math.cos(p.angle);
+    let dvx = 0, dvy = 0;
+    if (p.keys.up)    { dvx += fwdX; dvy += fwdY; }
+    if (p.keys.down)  { dvx -= fwdX; dvy -= fwdY; }
+    if (p.keys.left)  { dvx += lefX; dvy += lefY; }
+    if (p.keys.right) { dvx -= lefX; dvy -= lefY; }
+    const dlen = Math.hypot(dvx, dvy) || 1;
+    p.vx = (dvx / dlen) * DASH_FORCE;
+    p.vy = (dvy / dlen) * DASH_FORCE;
   });
 
   socket.on('kamehameha', ({ angle }) => {
@@ -203,10 +208,13 @@ setInterval(() => {
       if (Math.abs(p.vx) < 0.1) p.vx = 0;
       if (Math.abs(p.vy) < 0.1) p.vy = 0;
 
-      if (p.keys.up)    p.y -= PLAYER_SPEED;
-      if (p.keys.down)  p.y += PLAYER_SPEED;
-      if (p.keys.left)  p.x -= PLAYER_SPEED;
-      if (p.keys.right) p.x += PLAYER_SPEED;
+      // FPS-relative movement (WASD moves relative to facing direction)
+      const fwdX = Math.cos(p.angle), fwdY = Math.sin(p.angle);
+      const lefX = Math.sin(p.angle), lefY = -Math.cos(p.angle);
+      if (p.keys.up)    { p.x += fwdX * PLAYER_SPEED; p.y += fwdY * PLAYER_SPEED; }
+      if (p.keys.down)  { p.x -= fwdX * PLAYER_SPEED; p.y -= fwdY * PLAYER_SPEED; }
+      if (p.keys.left)  { p.x += lefX * PLAYER_SPEED; p.y += lefY * PLAYER_SPEED; }
+      if (p.keys.right) { p.x -= lefX * PLAYER_SPEED; p.y -= lefY * PLAYER_SPEED; }
 
       p.x = Math.max(PLAYER_R, Math.min(MAP_W - PLAYER_R, p.x));
       p.y = Math.max(PLAYER_R, Math.min(MAP_H - PLAYER_R, p.y));

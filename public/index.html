@@ -86,8 +86,8 @@
     .hint { margin-top: 1.2rem; font-size: 0.68rem; color: #333; letter-spacing: 1px; }
 
     /* GAME */
-    #game { display: none; position: relative; z-index: 1; }
-    canvas { display: block; cursor: none; border-radius: 4px; }
+    #game { display: none; position: fixed; inset: 0; z-index: 2; }
+    #canvas { display: block; cursor: none; width: 100%; height: 100%; }
 
     /* OVERLAY */
     #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 20; }
