@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Rock Arena</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Segoe+UI&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a1a;
+      color: white;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Animated title background */
+    #bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* LOBBY */
+    #lobby {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      background: rgba(0,0,0,0.55);
+      border: 2px solid rgba(255,165,0,0.3);
+      border-radius: 20px;
+      padding: 40px 50px;
+      backdrop-filter: blur(6px);
+    }
+
+    #lobby h1 {
+      font-size: 5rem;
+      font-family: 'Bangers', 'Impact', fantasy;
+      letter-spacing: 6px;
+      background: linear-gradient(135deg, #ff8c00, #ff4500, #ff8c00);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: none;
+      filter: drop-shadow(0 0 18px rgba(255,120,0,0.6));
+      margin-bottom: 0.2rem;
+    }
+
+    #lobby .tagline {
+      color: #aaa;
+      font-size: 0.9rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 2rem;
+    }
+
+    .inputs-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 1.8rem;
+    }
+
+    #name-input {
+      padding: 12px 18px;
+      font-size: 1rem;
+      border-radius: 8px;
+      border: 2px solid rgba(255,165,0,0.5);
+      background: rgba(255,255,255,0.06);
+      color: white;
+      outline: none;
+      width: 200px;
+      transition: border-color 0.2s;
+    }
+    #name-input:focus { border-color: orange; }
+    #name-input::placeholder { color: #555; }
+
+    #color-pick {
+      width: 48px;
+      height: 48px;
+      border: 2px solid rgba(255,165,0,0.5);
+      border-radius: 8px;
+      background: none;
+      cursor: pointer;
+      padding: 2px;
+    }
+    #color-pick::-webkit-color-swatch-wrapper { padding: 0; }
+    #color-pick::-webkit-color-swatch { border-radius: 5px; border: none; }
+
+    .lobbies {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+    }
+
+    .lobby-btn {
+      padding: 16px 22px;
+      font-size: 0.95rem;
+      border-radius: 12px;
+      border: 2px solid rgba(255,165,0,0.5);
+      background: rgba(255,165,0,0.06);
+      color: white;
+      cursor: pointer;
+      transition: all 0.15s;
+      min-width: 130px;
+      line-height: 1.7;
+    }
+    .lobby-btn:hover:not(.full) {
+      background: orange;
+      color: black;
+      border-color: orange;
+      transform: translateY(-3px);
+      box-shadow: 0 6px 20px rgba(255,165,0,0.3);
+    }
+    .lobby-btn.full { border-color: #333; color: #444; cursor: not-allowed; }
+    .lobby-btn .cnt { font-size: 0.8rem; opacity: 0.7; }
+
+    .controls-hint {
+      margin-top: 1.5rem;
+      font-size: 0.72rem;
+      color: #444;
+      letter-spacing: 1px;
+    }
+
+    /* GAME */
+    #game {
+      display: none;
+      position: relative;
+      z-index: 1;
+    }
+    canvas {
+      display: block;
+      cursor: none;
+      border-radius: 4px;
+    }
+
+    /* OVERLAY */
+    #overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.8);
+      justify-content: center;
+      align-items: center;
+      z-index: 20;
+    }
+    #overlay-box {
+      text-align: center;
+      border: 3px solid orange;
+      border-radius: 18px;
+      padding: 36px 70px;
+      background: #0d0d1d;
+    }
+    #overlay-box h2 {
+      font-size: 3rem;
+      font-family: 'Bangers', Impact, fantasy;
+      letter-spacing: 4px;
+      color: orange;
+      filter: drop-shadow(0 0 12px rgba(255,165,0,0.5));
+    }
+    #overlay-box p { color: #aaa; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+
+<div id="lobby">
+  <h1>ROCK ARENA</h1>
+  <p class="tagline">Throw rocks &bull; Dodge everything &bull; Last ball standing</p>
+  <div class="inputs-row">
+    <input id="name-input" type="text" placeholder="Your name" maxlength="16" />
+    <input id="color-pick" type="color" value="#ff6600" title="Pick your colour" />
+  </div>
+  <div class="lobbies">
+    <button class="lobby-btn" data-lobby="1">Lobby 1<br><span class="cnt">?/10</span></button>
+    <button class="lobby-btn" data-lobby="2">Lobby 2<br><span class="cnt">?/10</span></button>
+    <button class="lobby-btn" data-lobby="3">Lobby 3<br><span class="cnt">?/10</span></button>
+  </div>
+  <p class="controls-hint">WASD move &nbsp;·&nbsp; Right-click throw &nbsp;·&nbsp; Hold F for KAMEHAMEHA</p>
+</div>
+
+<div id="game">
+  <canvas id="canvas" width="900" height="620"></canvas>
+</div>
+
+<div id="overlay">
+  <div id="overlay-box">
+    <h2 id="overlay-title"></h2>
+    <p id="overlay-sub"></p>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
