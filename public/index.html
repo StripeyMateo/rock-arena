@@ -4,10 +4,7 @@
   <meta charset="UTF-8">
   <title>Rock Arena</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Segoe+UI&display=swap');
-
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     body {
       background: #0a0a1a;
       color: white;
@@ -18,154 +15,84 @@
       height: 100vh;
       overflow: hidden;
     }
+    #bg { position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%; }
 
-    /* Animated title background */
-    #bg {
-      position: fixed;
-      inset: 0;
-      z-index: 0;
-      width: 100%;
-      height: 100%;
-    }
-
-    /* LOBBY */
+    /* LOBBY CARD */
     #lobby {
-      position: relative;
-      z-index: 1;
-      text-align: center;
-      background: rgba(0,0,0,0.55);
+      position: relative; z-index: 1;
+      background: rgba(0,0,0,0.6);
       border: 2px solid rgba(255,165,0,0.3);
       border-radius: 20px;
-      padding: 40px 50px;
-      backdrop-filter: blur(6px);
+      padding: 32px 44px 28px;
+      backdrop-filter: blur(8px);
+      min-width: 460px;
+      text-align: center;
     }
-
     #lobby h1 {
-      font-size: 5rem;
-      font-family: 'Bangers', 'Impact', fantasy;
+      font-size: 4.5rem;
+      font-family: Impact, fantasy;
       letter-spacing: 6px;
-      background: linear-gradient(135deg, #ff8c00, #ff4500, #ff8c00);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      text-shadow: none;
-      filter: drop-shadow(0 0 18px rgba(255,120,0,0.6));
+      background: linear-gradient(135deg, #ff8c00, #ff4500, #ffcc00);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      filter: drop-shadow(0 0 18px rgba(255,120,0,0.5));
       margin-bottom: 0.2rem;
     }
+    #lobby .tagline { color: #666; font-size: 0.78rem; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 1.4rem; }
 
-    #lobby .tagline {
-      color: #aaa;
-      font-size: 0.9rem;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-      margin-bottom: 2rem;
+    /* TABS */
+    .tab-bar { display: flex; gap: 0; margin-bottom: 1.4rem; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,165,0,0.25); }
+    .tab-btn {
+      flex: 1; padding: 10px; font-size: 0.85rem; letter-spacing: 1px; text-transform: uppercase;
+      background: rgba(255,255,255,0.03); color: #666; border: none; cursor: pointer; transition: all 0.15s;
     }
+    .tab-btn.active { background: rgba(255,165,0,0.15); color: orange; }
+    .tab-btn:hover:not(.active) { background: rgba(255,255,255,0.06); color: #aaa; }
 
-    .inputs-row {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      align-items: center;
-      margin-bottom: 1.8rem;
-    }
-
+    /* PLAY TAB */
+    .inputs-row { display: flex; gap: 10px; justify-content: center; align-items: center; margin-bottom: 1.4rem; }
     #name-input {
-      padding: 12px 18px;
-      font-size: 1rem;
-      border-radius: 8px;
-      border: 2px solid rgba(255,165,0,0.5);
-      background: rgba(255,255,255,0.06);
-      color: white;
-      outline: none;
-      width: 200px;
-      transition: border-color 0.2s;
+      padding: 11px 16px; font-size: 1rem; border-radius: 8px;
+      border: 2px solid rgba(255,165,0,0.4); background: rgba(255,255,255,0.05);
+      color: white; outline: none; width: 200px; transition: border-color 0.2s;
     }
     #name-input:focus { border-color: orange; }
-    #name-input::placeholder { color: #555; }
-
+    #name-input::placeholder { color: #444; }
     #color-pick {
-      width: 48px;
-      height: 48px;
-      border: 2px solid rgba(255,165,0,0.5);
-      border-radius: 8px;
-      background: none;
-      cursor: pointer;
-      padding: 2px;
+      width: 46px; height: 46px; border: 2px solid rgba(255,165,0,0.4);
+      border-radius: 8px; background: none; cursor: pointer; padding: 2px;
     }
     #color-pick::-webkit-color-swatch-wrapper { padding: 0; }
     #color-pick::-webkit-color-swatch { border-radius: 5px; border: none; }
-
-    .lobbies {
-      display: flex;
-      gap: 14px;
-      justify-content: center;
-    }
-
+    .lobbies { display: flex; gap: 12px; justify-content: center; }
     .lobby-btn {
-      padding: 16px 22px;
-      font-size: 0.95rem;
-      border-radius: 12px;
-      border: 2px solid rgba(255,165,0,0.5);
-      background: rgba(255,165,0,0.06);
-      color: white;
-      cursor: pointer;
-      transition: all 0.15s;
-      min-width: 130px;
-      line-height: 1.7;
+      padding: 14px 20px; font-size: 0.9rem; border-radius: 10px;
+      border: 2px solid rgba(255,165,0,0.4); background: rgba(255,165,0,0.05);
+      color: white; cursor: pointer; transition: all 0.15s; min-width: 128px; line-height: 1.7;
     }
-    .lobby-btn:hover:not(.full) {
-      background: orange;
-      color: black;
-      border-color: orange;
-      transform: translateY(-3px);
-      box-shadow: 0 6px 20px rgba(255,165,0,0.3);
-    }
-    .lobby-btn.full { border-color: #333; color: #444; cursor: not-allowed; }
-    .lobby-btn .cnt { font-size: 0.8rem; opacity: 0.7; }
+    .lobby-btn:hover:not(.full) { background: orange; color: black; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(255,165,0,0.25); }
+    .lobby-btn.full { border-color: #2a2a2a; color: #333; cursor: not-allowed; }
+    .lobby-btn .cnt { font-size: 0.75rem; opacity: 0.6; }
 
-    .controls-hint {
-      margin-top: 1.5rem;
-      font-size: 0.72rem;
-      color: #444;
-      letter-spacing: 1px;
-    }
+    /* HOW TO PLAY TAB */
+    #tab-rules { text-align: left; }
+    .rules-section { margin-bottom: 1rem; }
+    .rules-section h3 { color: orange; font-size: 0.8rem; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 0.5rem; border-bottom: 1px solid rgba(255,165,0,0.2); padding-bottom: 4px; }
+    .key-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; font-size: 0.82rem; color: #bbb; }
+    .key { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 5px; padding: 2px 8px; font-size: 0.75rem; color: white; font-family: monospace; white-space: nowrap; }
+    .rules-list { list-style: none; }
+    .rules-list li { color: #aaa; font-size: 0.82rem; padding: 3px 0; padding-left: 14px; position: relative; }
+    .rules-list li::before { content: '▸'; position: absolute; left: 0; color: orange; }
+
+    .hint { margin-top: 1.2rem; font-size: 0.68rem; color: #333; letter-spacing: 1px; }
 
     /* GAME */
-    #game {
-      display: none;
-      position: relative;
-      z-index: 1;
-    }
-    canvas {
-      display: block;
-      cursor: none;
-      border-radius: 4px;
-    }
+    #game { display: none; position: relative; z-index: 1; }
+    canvas { display: block; cursor: none; border-radius: 4px; }
 
     /* OVERLAY */
-    #overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.8);
-      justify-content: center;
-      align-items: center;
-      z-index: 20;
-    }
-    #overlay-box {
-      text-align: center;
-      border: 3px solid orange;
-      border-radius: 18px;
-      padding: 36px 70px;
-      background: #0d0d1d;
-    }
-    #overlay-box h2 {
-      font-size: 3rem;
-      font-family: 'Bangers', Impact, fantasy;
-      letter-spacing: 4px;
-      color: orange;
-      filter: drop-shadow(0 0 12px rgba(255,165,0,0.5));
-    }
+    #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 20; }
+    #overlay-box { text-align: center; border: 3px solid orange; border-radius: 18px; padding: 36px 70px; background: #0d0d1d; }
+    #overlay-box h2 { font-size: 3rem; font-family: Impact, fantasy; letter-spacing: 4px; color: orange; filter: drop-shadow(0 0 12px rgba(255,165,0,0.5)); }
     #overlay-box p { color: #aaa; margin-top: 8px; }
   </style>
 </head>
@@ -176,16 +103,60 @@
 <div id="lobby">
   <h1>ROCK ARENA</h1>
   <p class="tagline">Throw rocks &bull; Dodge everything &bull; Last ball standing</p>
-  <div class="inputs-row">
-    <input id="name-input" type="text" placeholder="Your name" maxlength="16" />
-    <input id="color-pick" type="color" value="#ff6600" title="Pick your colour" />
+
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="showTab('play')">Play</button>
+    <button class="tab-btn" onclick="showTab('rules')">How To Play</button>
   </div>
-  <div class="lobbies">
-    <button class="lobby-btn" data-lobby="1">Lobby 1<br><span class="cnt">?/10</span></button>
-    <button class="lobby-btn" data-lobby="2">Lobby 2<br><span class="cnt">?/10</span></button>
-    <button class="lobby-btn" data-lobby="3">Lobby 3<br><span class="cnt">?/10</span></button>
+
+  <!-- PLAY TAB -->
+  <div id="tab-play">
+    <div class="inputs-row">
+      <input id="name-input" type="text" placeholder="Your name" maxlength="16" />
+      <input id="color-pick" type="color" value="#ff6600" title="Pick your colour" />
+    </div>
+    <div class="lobbies">
+      <button class="lobby-btn" data-lobby="1">Lobby 1<br><span class="cnt">?/10</span></button>
+      <button class="lobby-btn" data-lobby="2">Lobby 2<br><span class="cnt">?/10</span></button>
+      <button class="lobby-btn" data-lobby="3">Lobby 3<br><span class="cnt">?/10</span></button>
+    </div>
+    <p class="hint">Move mouse to look around &nbsp;·&nbsp; WASD move &nbsp;·&nbsp; Right-click throw &nbsp;·&nbsp; F Kamehameha &nbsp;·&nbsp; Q shield &nbsp;·&nbsp; Space dash</p>
   </div>
-  <p class="controls-hint">WASD move &nbsp;·&nbsp; Right-click throw &nbsp;·&nbsp; Hold F for KAMEHAMEHA</p>
+
+  <!-- HOW TO PLAY TAB -->
+  <div id="tab-rules" style="display:none">
+    <div class="rules-section">
+      <h3>Controls</h3>
+      <div class="key-row"><span class="key">W A S D</span> Move around</div>
+      <div class="key-row"><span class="key">Mouse</span> Look around / aim</div>
+      <div class="key-row"><span class="key">Right click</span> Throw a rock (10 ammo max, refills over time)</div>
+      <div class="key-row"><span class="key">Space</span> Dash in your movement direction (3s cooldown)</div>
+      <div class="key-row"><span class="key">Q</span> Activate shield — blocks the next hit (8s cooldown)</div>
+      <div class="key-row"><span class="key">F</span> Hold to charge Kamehameha laser — releases after 1.5s</div>
+    </div>
+    <div class="rules-section">
+      <h3>Rules</h3>
+      <ul class="rules-list">
+        <li>Each player starts with 50 HP</li>
+        <li>Each rock hit deals 10 damage</li>
+        <li>Kamehameha laser deals 30 damage and passes through players</li>
+        <li>Rocks bounce off walls and cover rocks (up to 4 bounces)</li>
+        <li>Shield absorbs one hit completely — even Kamehameha</li>
+        <li>Last player alive wins the round</li>
+        <li>Up to 10 players per lobby across 3 lobbies</li>
+      </ul>
+    </div>
+    <div class="rules-section">
+      <h3>Tips</h3>
+      <ul class="rules-list">
+        <li>Use cover rocks to dodge — hide and peek out to throw</li>
+        <li>Bounced rocks glow gold and are harder to dodge</li>
+        <li>Save your shield for Kamehameha — it blocks it completely</li>
+        <li>Dash to escape tight situations or close the gap fast</li>
+        <li>The minimap (bottom right) shows all living players</li>
+      </ul>
+    </div>
+  </div>
 </div>
 
 <div id="game">
@@ -199,6 +170,13 @@
   </div>
 </div>
 
+<script>
+  function showTab(name) {
+    document.getElementById('tab-play').style.display = name === 'play' ? 'block' : 'none';
+    document.getElementById('tab-rules').style.display = name === 'rules' ? 'block' : 'none';
+    document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', (i === 0) === (name === 'play')));
+  }
+</script>
 <script src="/socket.io/socket.io.js"></script>
 <script src="game.js"></script>
 </body>
