@@ -28,15 +28,29 @@ const KAME_COOLDOWN = 480;
 const KAME_BEAM_LEN = 3000;
 const KAME_BEAM_WIDTH = 35;
 const KAME_DAMAGE = 30;
+const DASH_FORCE = 14;
+const DASH_COOLDOWN = 180;
+const MAX_BOUNCES = 4;
+
+// Static cover obstacles (shared between server and client)
+const OBSTACLES = [
+  { x: 400,  y: 300,  r: 48 },
+  { x: 1200, y: 300,  r: 48 },
+  { x: 800,  y: 600,  r: 58 },
+  { x: 400,  y: 900,  r: 48 },
+  { x: 1200, y: 900,  r: 48 },
+  { x: 200,  y: 600,  r: 36 },
+  { x: 1400, y: 600,  r: 36 },
+  { x: 800,  y: 200,  r: 36 },
+  { x: 800,  y: 1000, r: 36 },
+];
 
 const lobbies = {};
 for (let i = 1; i <= LOBBY_COUNT; i++) {
   lobbies[i] = { id: i, players: {}, rocks: [], beams: [], rockCounter: 0 };
 }
 
-function playerCount(id) {
-  return Object.keys(lobbies[id].players).length;
-}
+function playerCount(id) { return Object.keys(lobbies[id].players).length; }
 
 function distToSegment(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
@@ -44,6 +58,18 @@ function distToSegment(px, py, ax, ay, bx, by) {
   if (lenSq === 0) return Math.hypot(px - ax, py - ay);
   const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function pushOutObstacles(p) {
+  OBSTACLES.forEach(obs => {
+    const dx = p.x - obs.x, dy = p.y - obs.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < PLAYER_R + obs.r) {
+      const ang = Math.atan2(dy, dx);
+      p.x = obs.x + Math.cos(ang) * (PLAYER_R + obs.r + 1);
+      p.y = obs.y + Math.sin(ang) * (PLAYER_R + obs.r + 1);
+    }
+  });
 }
 
 io.on('connection', (socket) => {
@@ -54,33 +80,27 @@ io.on('connection', (socket) => {
     const l = lobbies[lobby];
     if (!l) return;
     if (playerCount(lobby) >= MAX_PLAYERS) { socket.emit('lobby_full'); return; }
-
     lobbyId = lobby;
     socket.join(`lobby_${lobby}`);
-
     l.players[id] = {
-      id,
-      name: (name || 'Player').slice(0, 16),
+      id, name: (name || 'Player').slice(0, 16),
       x: 150 + Math.random() * (MAP_W - 300),
       y: 150 + Math.random() * (MAP_H - 300),
-      hp: MAX_HP,
-      alive: true,
+      hp: MAX_HP, alive: true,
       color: color || `hsl(${Math.floor(Math.random() * 360)},70%,60%)`,
       keys: { up: false, down: false, left: false, right: false },
-      angle: 0,
-      rockCooldown: 0,
-      kameCooldown: 0
+      angle: 0, vx: 0, vy: 0,
+      rockCooldown: 0, kameCooldown: 0, dashCooldown: 0,
+      lastHitBy: null
     };
-
-    socket.emit('joined', { id, mapW: MAP_W, mapH: MAP_H });
+    socket.emit('joined', { id, mapW: MAP_W, mapH: MAP_H, obstacles: OBSTACLES });
   });
 
   socket.on('input', ({ keys, angle }) => {
     if (!lobbyId) return;
     const p = lobbies[lobbyId].players[id];
     if (!p || !p.alive) return;
-    p.keys = keys;
-    p.angle = angle;
+    p.keys = keys; p.angle = angle;
   });
 
   socket.on('throw', ({ angle }) => {
@@ -95,9 +115,20 @@ io.on('connection', (socket) => {
       y: p.y + Math.sin(angle) * (PLAYER_R + ROCK_R + 2),
       vx: Math.cos(angle) * ROCK_SPEED,
       vy: Math.sin(angle) * ROCK_SPEED,
-      owner: id,
-      life: 160
+      owner: id, life: 220, bounces: 0
     });
+  });
+
+  socket.on('dash', () => {
+    if (!lobbyId) return;
+    const p = lobbies[lobbyId].players[id];
+    if (!p || !p.alive || p.dashCooldown > 0) return;
+    p.dashCooldown = DASH_COOLDOWN;
+    const dx = (p.keys.right ? 1 : 0) - (p.keys.left ? 1 : 0);
+    const dy = (p.keys.down ? 1 : 0) - (p.keys.up ? 1 : 0);
+    const len = Math.hypot(dx, dy) || 1;
+    p.vx = (dx / len) * DASH_FORCE;
+    p.vy = (dy / len) * DASH_FORCE;
   });
 
   socket.on('kamehameha', ({ angle }) => {
@@ -106,20 +137,21 @@ io.on('connection', (socket) => {
     const p = l.players[id];
     if (!p || !p.alive || p.kameCooldown > 0) return;
     p.kameCooldown = KAME_COOLDOWN;
-
     const bx2 = p.x + Math.cos(angle) * KAME_BEAM_LEN;
     const by2 = p.y + Math.sin(angle) * KAME_BEAM_LEN;
-
     for (const pid in l.players) {
       if (pid === id) continue;
       const t = l.players[pid];
       if (!t.alive) continue;
       if (distToSegment(t.x, t.y, p.x, p.y, bx2, by2) < KAME_BEAM_WIDTH) {
         t.hp -= KAME_DAMAGE;
-        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+        t.lastHitBy = id;
+        if (t.hp <= 0) {
+          t.hp = 0; t.alive = false;
+          io.to(`lobby_${lobbyId}`).emit('kill', { killer: p.name, victim: t.name });
+        }
       }
     }
-
     l.beams.push({ id: l.rockCounter++, x: p.x, y: p.y, angle, life: 30 });
   });
 
@@ -136,26 +168,66 @@ setInterval(() => {
     for (const pid in l.players) {
       const p = l.players[pid];
       if (!p.alive) continue;
+
+      // Apply dash velocity (decays)
+      p.x += p.vx; p.y += p.vy;
+      p.vx *= 0.8; p.vy *= 0.8;
+      if (Math.abs(p.vx) < 0.1) p.vx = 0;
+      if (Math.abs(p.vy) < 0.1) p.vy = 0;
+
       if (p.keys.up)    p.y -= PLAYER_SPEED;
       if (p.keys.down)  p.y += PLAYER_SPEED;
       if (p.keys.left)  p.x -= PLAYER_SPEED;
       if (p.keys.right) p.x += PLAYER_SPEED;
+
       p.x = Math.max(PLAYER_R, Math.min(MAP_W - PLAYER_R, p.x));
       p.y = Math.max(PLAYER_R, Math.min(MAP_H - PLAYER_R, p.y));
+      pushOutObstacles(p);
+
       if (p.rockCooldown > 0) p.rockCooldown--;
       if (p.kameCooldown > 0) p.kameCooldown--;
+      if (p.dashCooldown > 0) p.dashCooldown--;
     }
 
     l.rocks = l.rocks.filter(r => {
       r.x += r.vx; r.y += r.vy; r.life--;
-      if (r.life <= 0 || r.x < 0 || r.x > MAP_W || r.y < 0 || r.y > MAP_H) return false;
+      if (r.life <= 0) return false;
+
+      // Wall bouncing
+      if (r.x < ROCK_R)        { r.x = ROCK_R;        r.vx *= -1; r.bounces++; }
+      if (r.x > MAP_W - ROCK_R) { r.x = MAP_W - ROCK_R; r.vx *= -1; r.bounces++; }
+      if (r.y < ROCK_R)        { r.y = ROCK_R;        r.vy *= -1; r.bounces++; }
+      if (r.y > MAP_H - ROCK_R) { r.y = MAP_H - ROCK_R; r.vy *= -1; r.bounces++; }
+      if (r.bounces > MAX_BOUNCES) return false;
+
+      // Obstacle bouncing
+      for (const obs of OBSTACLES) {
+        const dx = r.x - obs.x, dy = r.y - obs.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < ROCK_R + obs.r) {
+          const nx = dx / dist, ny = dy / dist;
+          const dot = r.vx * nx + r.vy * ny;
+          r.vx -= 2 * dot * nx; r.vy -= 2 * dot * ny;
+          r.x = obs.x + nx * (ROCK_R + obs.r + 1);
+          r.y = obs.y + ny * (ROCK_R + obs.r + 1);
+          r.bounces++;
+          break;
+        }
+      }
+
+      // Player hit
       for (const pid in l.players) {
         if (pid === r.owner) continue;
         const p = l.players[pid];
         if (!p.alive) continue;
         if (Math.hypot(r.x - p.x, r.y - p.y) < PLAYER_R + ROCK_R) {
           p.hp -= HIT_DAMAGE;
-          if (p.hp <= 0) { p.hp = 0; p.alive = false; }
+          p.lastHitBy = r.owner;
+          if (p.hp <= 0) {
+            p.hp = 0; p.alive = false;
+            const killer = l.players[r.owner];
+            io.to(`lobby_${lid}`).emit('kill', { killer: killer?.name || '?', victim: p.name });
+          }
           return false;
         }
       }
@@ -170,19 +242,18 @@ setInterval(() => {
       players: Object.values(l.players).map(p => ({
         id: p.id, name: p.name, x: p.x, y: p.y,
         hp: p.hp, alive: p.alive, color: p.color, angle: p.angle,
-        ready: p.rockCooldown === 0, kamReady: p.kameCooldown === 0
+        ready: p.rockCooldown === 0, kamReady: p.kameCooldown === 0,
+        dashCooldown: p.dashCooldown
       })),
-      rocks: l.rocks.map(r => ({ id: r.id, x: r.x, y: r.y })),
+      rocks: l.rocks.map(r => ({ id: r.id, x: r.x, y: r.y, bounces: r.bounces })),
       beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, angle: b.angle, life: b.life }))
     });
   }
 }, 1000 / TICK_RATE);
 
 app.get('/api/lobbies', (req, res) => {
-  res.json(Object.keys(lobbies).map(id => ({
-    id: parseInt(id), count: playerCount(id), max: MAX_PLAYERS
-  })));
+  res.json(Object.keys(lobbies).map(id => ({ id: parseInt(id), count: playerCount(id), max: MAX_PLAYERS })));
 });
 
 const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => console.log(`Rock Arena running on http://localhost:${PORT}`));
+httpServer.listen(PORT, () => console.log(`Rock Arena running on port ${PORT}`));
