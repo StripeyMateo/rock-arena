@@ -1,4 +1,5 @@
 const WORLD_W = 1600, WORLD_H = 1200;
+function hsla(color, alpha) { return color.replace('hsl(', 'hsla(').replace(')', `,${alpha})`); }
 const CW = 900, CH = 620;
 
 // ── State ────────────────────────────────────────────────────
@@ -82,7 +83,7 @@ function animateTitle() {
 
     // Glow
     const glow = bgCtx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * 2.5);
-    glow.addColorStop(0, b.color + '30');
+    glow.addColorStop(0, hsla(b.color, 0.19));
     glow.addColorStop(1, 'transparent');
     bgCtx.beginPath();
     bgCtx.arc(b.x, b.y, b.r * 2.5, 0, Math.PI * 2);
@@ -92,16 +93,16 @@ function animateTitle() {
     // Body
     bgCtx.beginPath();
     bgCtx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
-    bgCtx.fillStyle = b.color + '28';
+    bgCtx.fillStyle = hsla(b.color, 0.16);
     bgCtx.fill();
-    bgCtx.strokeStyle = b.color + '60';
+    bgCtx.strokeStyle = hsla(b.color, 0.38);
     bgCtx.lineWidth = 2;
     bgCtx.stroke();
 
     // Eyes
     const ex = Math.cos(b.eyeAngle), ey = Math.sin(b.eyeAngle);
     const px = -Math.sin(b.eyeAngle), py = Math.cos(b.eyeAngle);
-    bgCtx.fillStyle = b.color + '70';
+    bgCtx.fillStyle = hsla(b.color, 0.44);
     [[1], [-1]].forEach(([s]) => {
       bgCtx.beginPath();
       bgCtx.arc(b.x + ex * b.r * 0.5 + px * b.r * 0.28 * s, b.y + ey * b.r * 0.5 + py * b.r * 0.28 * s, b.r * 0.18, 0, Math.PI * 2);
