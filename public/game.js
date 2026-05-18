@@ -27,6 +27,7 @@ let myId = null, serverState = null;
 let obstacles = [], platforms = [], portal = null;
 let camX = 800, camY = 600, camZ = 0;
 let worldAngle = 0;
+let pitchAngle = 0;
 let gameActive = false, gameOverFlag = false;
 const keys = { up: false, down: false, left: false, right: false };
 const hand = { state: 'idle', timer: 0, rockSent: false, dur: { windup: 11, throw: 7, recover: 18 } };
@@ -201,7 +202,6 @@ document.addEventListener('keydown', e => {
   if (e.key === 'f' || e.key === 'F') kame.held = true;
   if (e.key === ' ') { e.preventDefault(); socket.emit('dash'); }
   if (e.key === 'q' || e.key === 'Q') socket.emit('shield');
-  if (e.key === 'e' || e.key === 'E') socket.emit('jump');
 });
 document.addEventListener('keyup', e => {
   if (!gameActive) return;
@@ -216,6 +216,8 @@ document.addEventListener('pointerlockchange', () => { pointerLocked = document.
 document.addEventListener('mousemove', e => {
   if (!gameActive || !pointerLocked) return;
   worldAngle += e.movementX * SENSITIVITY;
+  pitchAngle += e.movementY * SENSITIVITY;
+  pitchAngle = Math.max(-0.55, Math.min(0.55, pitchAngle));
 });
 canvas.addEventListener('mousedown', e => {
   if (e.button !== 2 || !gameActive || !myId || !serverState) return;
@@ -268,13 +270,14 @@ function project(wx, wy, wz) {
   if (zc < 2) return null;
   const sc = FOCAL / zc;
   const eyeZ = EYE_H + camZ;
-  return { sx: CW / 2 + xc * sc, sy: CH / 2 + (eyeZ - wz) * sc, scale: sc, zc };
+  const pitchOffset = Math.tan(pitchAngle) * FOCAL;
+  return { sx: CW / 2 + xc * sc, sy: CH / 2 - pitchOffset + (eyeZ - wz) * sc, scale: sc, zc };
 }
 
 // ── Space sky & void floor ─────────────────────────────────────
 function drawSkyAndFloor() {
-  const hy = CH / 2 + camZ * FOCAL / Math.max(1, 200); // horizon shifts with height
-  const clampedHy = Math.max(CH * 0.15, Math.min(CH * 0.85, hy));
+  const hy = CH / 2 - Math.tan(pitchAngle) * FOCAL + camZ * FOCAL / Math.max(1, 200);
+  const clampedHy = Math.max(CH * 0.1, Math.min(CH * 0.9, hy));
 
   // Deep space sky
   ctx.fillStyle = '#02020f'; ctx.fillRect(0, 0, CW, clampedHy);
@@ -326,46 +329,81 @@ function drawSkyAndFloor() {
 
 // ── Stone pillar obstacles ─────────────────────────────────────
 function drawObstacle3D(obs) {
+  const SEGS = 16;
   const OBS_H = obs.r * 2.4;
   const base = project(obs.x, obs.y, 0);
-  const top  = project(obs.x, obs.y, OBS_H);
   if (!base || base.zc > 1500) return;
-  const sc = base.scale;
-  const rw = obs.r * sc;
-  const topRw = top ? obs.r * top.scale : rw * 0.5;
-  const topY = top ? top.sy : base.sy - rw * 2.2;
 
   ctx.save();
-  // Shadow
+
+  // Shadow ellipse on floor
+  const rw = obs.r * base.scale;
   ctx.beginPath(); ctx.ellipse(base.sx, base.sy, rw * 0.9, rw * 0.25, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fill();
 
-  // Stone side body
-  ctx.beginPath();
-  ctx.moveTo(base.sx - rw, base.sy);
-  ctx.lineTo(base.sx + rw, base.sy);
-  ctx.lineTo(base.sx + topRw, topY);
-  ctx.lineTo(base.sx - topRw, topY);
-  ctx.closePath();
-  const sg = ctx.createLinearGradient(base.sx - rw, 0, base.sx + rw, 0);
-  sg.addColorStop(0, '#252830'); sg.addColorStop(0.35, '#3d4050'); sg.addColorStop(0.65, '#353840'); sg.addColorStop(1, '#1e2028');
-  ctx.fillStyle = sg; ctx.fill();
-  // Stone edge lines (cracks)
-  ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 0.8;
-  const cx2 = base.sx, midY = (base.sy + topY) / 2;
-  ctx.beginPath(); ctx.moveTo(cx2 - rw * 0.15, midY + rw * 0.2); ctx.lineTo(cx2 + rw * 0.1, midY - rw * 0.1); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx2 + rw * 0.25, midY + rw * 0.3); ctx.lineTo(cx2 + rw * 0.35, midY - rw * 0.15); ctx.stroke();
+  // Build visible face segments (back-face culled)
+  const faces = [];
+  for (let i = 0; i < SEGS; i++) {
+    const a0 = (i / SEGS) * Math.PI * 2;
+    const a1 = ((i + 1) / SEGS) * Math.PI * 2;
+    const midA = (a0 + a1) / 2;
+    // Back-face cull: segment faces away from camera when dot product is negative
+    const facingFactor = -Math.cos(midA - worldAngle);
+    if (facingFactor <= 0) continue;
 
-  // Top cap
-  ctx.beginPath(); ctx.ellipse(base.sx, topY, topRw, topRw * 0.28, 0, 0, Math.PI * 2);
-  const tg = ctx.createRadialGradient(base.sx - topRw * 0.3, topY, 0, base.sx, topY, topRw);
-  tg.addColorStop(0, '#5a5e68'); tg.addColorStop(1, '#2e3038');
-  ctx.fillStyle = tg; ctx.fill();
-  ctx.strokeStyle = '#1e2028'; ctx.lineWidth = 1; ctx.stroke();
+    const wx0 = obs.x + Math.cos(a0) * obs.r;
+    const wy0 = obs.y + Math.sin(a0) * obs.r;
+    const wx1 = obs.x + Math.cos(a1) * obs.r;
+    const wy1 = obs.y + Math.sin(a1) * obs.r;
 
-  // Moss/glow at base
+    const pb0 = project(wx0, wy0, 0);
+    const pb1 = project(wx1, wy1, 0);
+    const pt0 = project(wx0, wy0, OBS_H);
+    const pt1 = project(wx1, wy1, OBS_H);
+    if (!pb0 || !pb1 || !pt0 || !pt1) continue;
+
+    // Average zc for painter's sort
+    const avgZc = (pb0.zc + pb1.zc) / 2;
+    faces.push({ pb0, pb1, pt0, pt1, facingFactor, avgZc });
+  }
+
+  // Sort back to front
+  faces.sort((a, b) => b.avgZc - a.avgZc);
+
+  for (const f of faces) {
+    const { pb0, pb1, pt0, pt1, facingFactor } = f;
+    const l = 0.18 + facingFactor * 0.72;
+    const r2 = Math.round(20 + 40 * l);
+    const g2 = Math.round(22 + 43 * l);
+    const b2 = Math.round(30 + 50 * l);
+    ctx.beginPath();
+    ctx.moveTo(pb0.sx, pb0.sy);
+    ctx.lineTo(pb1.sx, pb1.sy);
+    ctx.lineTo(pt1.sx, pt1.sy);
+    ctx.lineTo(pt0.sx, pt0.sy);
+    ctx.closePath();
+    ctx.fillStyle = `rgb(${r2},${g2},${b2})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(0,0,0,${0.2 + facingFactor * 0.15})`;
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+  }
+
+  // Top cap ellipse
+  const top = project(obs.x, obs.y, OBS_H);
+  if (top) {
+    const topRw = obs.r * top.scale;
+    ctx.beginPath(); ctx.ellipse(top.sx, top.sy, topRw, topRw * 0.3, 0, 0, Math.PI * 2);
+    const tg = ctx.createRadialGradient(top.sx - topRw * 0.25, top.sy, 0, top.sx, top.sy, topRw);
+    tg.addColorStop(0, '#6a6e78'); tg.addColorStop(1, '#2e3040');
+    ctx.fillStyle = tg; ctx.fill();
+    ctx.strokeStyle = '#1e2030'; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  // Base ambient glow
   ctx.beginPath(); ctx.ellipse(base.sx, base.sy, rw, rw * 0.25, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(60,90,180,0.12)'; ctx.fill();
+  ctx.fillStyle = 'rgba(60,90,180,0.1)'; ctx.fill();
+
   ctx.restore();
 }
 
@@ -611,21 +649,43 @@ function drawBeams3D() {
     const bz = b.z || 22;
 
     if (isOwn) {
-      // My own kame: screen-space blast from screen center
+      // My own kame: perspective cone from hand area toward crosshair and beyond
       ctx.save();
-      const bLen = Math.max(CW, CH) * 1.5;
-      const grad = ctx.createLinearGradient(CW/2, CH/2, CW/2 + bLen, CH/2);
+      // Hand origin (right side, lower screen)
+      const hx = CW * 0.60, hy2 = CH * 0.74;
+      // Crosshair center
+      const cx2 = CW / 2, cy2 = CH / 2;
+      // Direction vector from hand toward crosshair, extended far
+      const dx2 = cx2 - hx, dy2 = cy2 - hy2;
+      const dist = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+      const nx = dx2 / dist, ny = dy2 / dist;
+      const farX = cx2 + nx * Math.max(CW, CH) * 1.8;
+      const farY = cy2 + ny * Math.max(CW, CH) * 1.8;
+
+      // Outer glow (wide near hand, tapers to point at far end)
+      const grad = ctx.createLinearGradient(hx, hy2, farX, farY);
       grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
-      grad.addColorStop(0.15, `rgba(80,200,255,${alpha * 0.9})`);
-      grad.addColorStop(0.5, `rgba(255,240,80,${alpha * 0.6})`);
+      grad.addColorStop(0.08, `rgba(80,200,255,${alpha * 0.95})`);
+      grad.addColorStop(0.35, `rgba(255,240,80,${alpha * 0.7})`);
       grad.addColorStop(1, 'rgba(80,200,255,0)');
-      ctx.strokeStyle = grad; ctx.lineWidth = 28 * alpha; ctx.lineCap = 'round';
-      ctx.shadowColor = 'rgba(80,200,255,0.95)'; ctx.shadowBlur = 30;
-      ctx.beginPath(); ctx.moveTo(CW/2, CH/2); ctx.lineTo(CW/2 + bLen, CH/2); ctx.stroke();
+      ctx.lineCap = 'round';
+      // Draw as tapered beam using decreasing lineWidth via clipping trick
+      ctx.shadowColor = 'rgba(80,200,255,0.95)'; ctx.shadowBlur = 28 * alpha;
+      ctx.strokeStyle = grad; ctx.lineWidth = 38 * alpha;
+      ctx.beginPath(); ctx.moveTo(hx, hy2); ctx.lineTo(cx2, cy2); ctx.stroke();
+      ctx.lineWidth = 22 * alpha;
+      ctx.beginPath(); ctx.moveTo(cx2, cy2); ctx.lineTo(farX, farY); ctx.stroke();
+      // Inner white core
+      const coreGrad = ctx.createLinearGradient(hx, hy2, farX, farY);
+      coreGrad.addColorStop(0, `rgba(255,255,255,${alpha * 0.9})`);
+      coreGrad.addColorStop(0.5, `rgba(255,255,255,${alpha * 0.5})`);
+      coreGrad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.strokeStyle = coreGrad; ctx.lineWidth = 10 * alpha; ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.moveTo(hx, hy2); ctx.lineTo(farX, farY); ctx.stroke();
       // Screen flash
-      ctx.fillStyle = `rgba(80,200,255,${alpha * 0.08})`;
+      ctx.fillStyle = `rgba(80,200,255,${alpha * 0.07})`;
       ctx.fillRect(0, 0, CW, CH);
-      ctx.shadowBlur = 0; ctx.restore();
+      ctx.restore();
       return;
     }
 
@@ -675,10 +735,10 @@ function drawHand() {
   const me = serverState.players.find(p => p.id === myId);
   if (!me || !me.alive) return;
 
-  const rest    = { x: CW / 2 + 80,  y: CH - 80 };
-  const windup  = { x: CW / 2 + 150, y: CH - 38 };
-  const throwP  = { x: CW / 2 - 30,  y: CH - 165 };
-  const armBase = { x: CW / 2 + 100, y: CH + 45 };
+  const rest    = { x: CW * 0.60,       y: CH * 0.74 };
+  const windup  = { x: CW * 0.60 + 90,  y: CH * 0.82 };
+  const throwP  = { x: CW * 0.60 - 90,  y: CH * 0.55 };
+  const armBase = { x: CW * 0.74,       y: CH * 1.08 };
   const t = hand.timer / (hand.dur[hand.state] || 1);
   let hp;
   if (hand.state === 'idle')         hp = rest;
@@ -687,27 +747,28 @@ function drawHand() {
   else                               hp = { x: lerp(throwP.x, rest.x, t),   y: lerp(throwP.y, rest.y, t) };
 
   ctx.save(); ctx.lineCap = 'round';
-  ctx.lineWidth = 26; ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  const HR = 34;
+  ctx.lineWidth = 34; ctx.strokeStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath(); ctx.moveTo(armBase.x + 3, armBase.y + 3); ctx.lineTo(hp.x + 3, hp.y + 3); ctx.stroke();
-  ctx.lineWidth = 24; ctx.strokeStyle = me.color;
+  ctx.lineWidth = 32; ctx.strokeStyle = me.color;
   ctx.beginPath(); ctx.moveTo(armBase.x, armBase.y); ctx.lineTo(hp.x, hp.y); ctx.stroke();
-  ctx.beginPath(); ctx.arc(hp.x, hp.y, 22, 0, Math.PI * 2);
+  ctx.beginPath(); ctx.arc(hp.x, hp.y, HR, 0, Math.PI * 2);
   ctx.fillStyle = me.color; ctx.fill();
   ctx.globalCompositeOperation = 'screen';
-  const hl = ctx.createRadialGradient(hp.x - 7, hp.y - 7, 0, hp.x, hp.y, 22);
-  hl.addColorStop(0, 'rgba(255,255,255,0.3)'); hl.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.beginPath(); ctx.arc(hp.x, hp.y, 22, 0, Math.PI * 2); ctx.fillStyle = hl; ctx.fill();
+  const hl = ctx.createRadialGradient(hp.x - 10, hp.y - 10, 0, hp.x, hp.y, HR);
+  hl.addColorStop(0, 'rgba(255,255,255,0.32)'); hl.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.beginPath(); ctx.arc(hp.x, hp.y, HR, 0, Math.PI * 2); ctx.fillStyle = hl; ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
-  ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 3; ctx.stroke();
-  [-7, 0, 7].forEach(o => {
-    ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(hp.x - 11, hp.y + o - 3);
-    ctx.quadraticCurveTo(hp.x, hp.y + o - 7, hp.x + 11, hp.y + o - 3); ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 4; ctx.stroke();
+  [-10, 0, 10].forEach(o => {
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(hp.x - 16, hp.y + o - 4);
+    ctx.quadraticCurveTo(hp.x, hp.y + o - 10, hp.x + 16, hp.y + o - 4); ctx.stroke();
   });
   if (me.ready && myAmmo > 0 && hand.state === 'idle') {
-    ctx.beginPath(); ctx.arc(hp.x - 14, hp.y - 28, 10, 0, Math.PI * 2);
+    ctx.beginPath(); ctx.arc(hp.x - 20, hp.y - HR - 8, 12, 0, Math.PI * 2);
     ctx.fillStyle = '#888'; ctx.fill(); ctx.strokeStyle = '#555'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.beginPath(); ctx.arc(hp.x - 16, hp.y - 30, 3.5, 0, Math.PI * 2);
+    ctx.beginPath(); ctx.arc(hp.x - 22, hp.y - HR - 10, 4.5, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fill();
   }
   ctx.restore();
@@ -723,7 +784,7 @@ function drawHand() {
     ctx.lineWidth = 20; ctx.strokeStyle = me.color;
     ctx.beginPath(); ctx.moveTo(sbX, sbY); ctx.lineTo(stX, stY); ctx.stroke();
     ctx.save(); ctx.translate(stX, stY); ctx.rotate(-0.35 + (1 - sa) * 1.1);
-    const sw = 72 + sa * 22, sh = 90 + sa * 28;
+    const sw = 98 + sa * 30, sh = 120 + sa * 36;
     ctx.beginPath(); ctx.ellipse(0, 0, sw * 0.5, sh * 0.5, 0, 0, Math.PI * 2);
     const sdg = ctx.createRadialGradient(-sw * 0.18, -sh * 0.18, 0, 0, 0, sw * 0.65);
     sdg.addColorStop(0, `rgba(200,240,255,${0.95 * sa})`);
@@ -844,7 +905,6 @@ function drawHUD() {
     { label: 'F — KAME',     ready: kame.cooldown <= 0,               pct: kame.cooldown <= 0 ? 1 : 1 - kame.cooldown / kame.maxCooldown, color: 'rgba(80,200,255,' },
     { label: 'Q — SHIELD',   ready: shieldCooldown <= 0 && !shieldActive, pct: shieldActive ? 1 : shieldCooldown <= 0 ? 1 : 1 - shieldCooldown / 480, color: 'rgba(80,200,255,' },
     { label: 'SPACE — DASH', ready: dashCooldown <= 0,                pct: dashCooldown <= 0 ? 1 : 1 - dashCooldown / 180, color: 'rgba(255,200,80,' },
-    { label: 'E — JUMP',     ready: true,                             pct: 1, color: 'rgba(150,255,150,' },
   ];
   bars.forEach((b, i) => {
     const bx = 10, by2 = CH - 22 - (bars.length - i - 1) * 20, bw = 110, bh = 14;
