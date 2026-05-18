@@ -2,10 +2,14 @@
 let SENSITIVITY = parseFloat(localStorage.getItem('ra_sens') || '0.003');
 let FOCAL       = parseInt(localStorage.getItem('ra_fov')  || '500');
 function updateSetting(key, val) {
-  if (key === 'sens') { SENSITIVITY = parseFloat(val); localStorage.setItem('ra_sens', val); }
-  if (key === 'fov')  { FOCAL = parseInt(val);         localStorage.setItem('ra_fov',  val); }
-  document.getElementById('sens-val').textContent = parseFloat(val).toFixed(3);
-  if (key === 'fov') document.getElementById('fov-val').textContent = val;
+  if (key === 'sens') {
+    SENSITIVITY = parseFloat(val); localStorage.setItem('ra_sens', val);
+    document.getElementById('sens-val').textContent = parseFloat(val).toFixed(3);
+  }
+  if (key === 'fov') {
+    FOCAL = parseInt(val); localStorage.setItem('ra_fov', val);
+    document.getElementById('fov-val').textContent = val;
+  }
 }
 window.updateSetting = updateSetting;
 
@@ -522,25 +526,23 @@ function drawPlayer3D(p) {
     ctx.fillStyle = `rgba(0,0,0,${alpha})`; ctx.fill();
   }
 
-  // Shield disc (large, held in front-left)
+  // Shield disc — slightly smaller than player body
   if (p.shieldActive) {
-    const shX = base.sx - R * 2.0, shY = bodyY - R * 0.1;
-    ctx.beginPath(); ctx.ellipse(shX, shY, R * 1.4, R * 1.8, -0.2, 0, Math.PI * 2);
-    const shg = ctx.createRadialGradient(shX - R * 0.3, shY - R * 0.3, 0, shX, shY, R * 1.8);
+    const shX = base.sx - R * 1.6, shY = bodyY - R * 0.05;
+    ctx.beginPath(); ctx.ellipse(shX, shY, R * 0.95, R * 1.25, -0.2, 0, Math.PI * 2);
+    const shg = ctx.createRadialGradient(shX - R * 0.2, shY - R * 0.2, 0, shX, shY, R * 1.25);
     shg.addColorStop(0, 'rgba(200,240,255,0.95)');
     shg.addColorStop(0.5, 'rgba(60,160,240,0.8)');
     shg.addColorStop(1, 'rgba(20,80,180,0.5)');
     ctx.fillStyle = shg; ctx.fill();
-    ctx.strokeStyle = 'rgba(80,200,255,1)'; ctx.lineWidth = Math.max(2, sc * 3);
-    ctx.shadowColor = 'rgba(80,200,255,0.9)'; ctx.shadowBlur = 18; ctx.stroke();
-    ctx.beginPath(); ctx.ellipse(shX, shY, R * 0.8, R * 1.05, -0.2, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(200,240,255,0.45)'; ctx.lineWidth = 1.5; ctx.shadowBlur = 0; ctx.stroke();
-    // Star emblem
-    ctx.fillStyle = `rgba(255,255,255,0.22)`;
-    ctx.font = `bold ${Math.round(R * 0.9)}px Impact, fantasy`;
+    ctx.strokeStyle = 'rgba(80,200,255,1)'; ctx.lineWidth = Math.max(2, sc * 2.5);
+    ctx.shadowColor = 'rgba(80,200,255,0.9)'; ctx.shadowBlur = 14; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(shX, shY, R * 0.55, R * 0.72, -0.2, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(200,240,255,0.4)'; ctx.lineWidth = 1.5; ctx.shadowBlur = 0; ctx.stroke();
+    ctx.fillStyle = `rgba(255,255,255,0.2)`;
+    ctx.font = `bold ${Math.round(R * 0.75)}px Impact, fantasy`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('★', shX, shY);
-    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('★', shX, shY); ctx.textBaseline = 'alphabetic';
   }
 
   // Hands
@@ -645,7 +647,7 @@ function drawBeams3D() {
     if (isOwn) {
       // Own kame: perspective trapezoid cone – wide at hand, converges to crosshair, fires through it
       ctx.save();
-      const hx = CW * 0.60, hy2 = CH * 0.76;   // matches hand rest position
+      const hx = CW * 0.55, hy2 = CH * 0.80;   // matches hand rest position
       const cx2 = CW / 2, cy2 = CH / 2;         // crosshair / aim point
       const dx2 = cx2 - hx, dy2 = cy2 - hy2;
       const dlen = Math.sqrt(dx2 * dx2 + dy2 * dy2);
@@ -760,10 +762,10 @@ function drawHand() {
   const me = serverState.players.find(p => p.id === myId);
   if (!me || !me.alive) return;
 
-  const rest    = { x: CW * 0.60,       y: CH * 0.76 };
-  const windup  = { x: CW * 0.60 + 80,  y: CH * 0.84 };
-  const throwP  = { x: CW * 0.60 - 80,  y: CH * 0.57 };
-  const armBase = { x: CW * 0.72,       y: CH * 1.10 };
+  const rest    = { x: CW * 0.55,       y: CH * 0.80 };
+  const windup  = { x: CW * 0.55 + 70,  y: CH * 0.87 };
+  const throwP  = { x: CW * 0.55 - 70,  y: CH * 0.60 };
+  const armBase = { x: CW * 0.57,       y: CH * 1.12 };
   const t = hand.timer / (hand.dur[hand.state] || 1);
   let hp;
   if (hand.state === 'idle')         hp = rest;
@@ -772,10 +774,10 @@ function drawHand() {
   else                               hp = { x: lerp(throwP.x, rest.x, t),   y: lerp(throwP.y, rest.y, t) };
 
   ctx.save(); ctx.lineCap = 'round';
-  const HR = 44;
-  ctx.lineWidth = 42; ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  const HR = 58;
+  ctx.lineWidth = 62; ctx.strokeStyle = 'rgba(0,0,0,0.32)';
   ctx.beginPath(); ctx.moveTo(armBase.x + 3, armBase.y + 3); ctx.lineTo(hp.x + 3, hp.y + 3); ctx.stroke();
-  ctx.lineWidth = 40; ctx.strokeStyle = me.color;
+  ctx.lineWidth = 58; ctx.strokeStyle = me.color;
   ctx.beginPath(); ctx.moveTo(armBase.x, armBase.y); ctx.lineTo(hp.x, hp.y); ctx.stroke();
   ctx.beginPath(); ctx.arc(hp.x, hp.y, HR, 0, Math.PI * 2);
   ctx.fillStyle = me.color; ctx.fill();
@@ -809,7 +811,7 @@ function drawHand() {
     ctx.lineWidth = 20; ctx.strokeStyle = me.color;
     ctx.beginPath(); ctx.moveTo(sbX, sbY); ctx.lineTo(stX, stY); ctx.stroke();
     ctx.save(); ctx.translate(stX, stY); ctx.rotate(-0.35 + (1 - sa) * 1.1);
-    const sw = 130 + sa * 38, sh = 158 + sa * 44;
+    const sw = 108 + sa * 24, sh = 130 + sa * 30;
     ctx.beginPath(); ctx.ellipse(0, 0, sw * 0.5, sh * 0.5, 0, 0, Math.PI * 2);
     const sdg = ctx.createRadialGradient(-sw * 0.18, -sh * 0.18, 0, 0, 0, sw * 0.65);
     sdg.addColorStop(0, `rgba(200,240,255,${0.95 * sa})`);
@@ -838,7 +840,7 @@ function drawHand() {
   // Kame charge orb
   if (kame.charge > 0 || kame.firing) {
     const ratio = kame.firing ? 1 : kame.charge / kame.maxCharge;
-    const kcx = CW / 2 + 22, kcy = CH - 72, kr = 6 + ratio * 40;
+    const kcx = CW * 0.55, kcy = CH * 0.80, kr = 8 + ratio * 48;
     ctx.save();
     const kg = ctx.createRadialGradient(kcx, kcy, 0, kcx, kcy, kr);
     kg.addColorStop(0, `rgba(255,255,255,${ratio})`);
@@ -1142,10 +1144,6 @@ function render() {
 
   // Collect & sort far→near
   const objects = [];
-  platforms.forEach(pl => {
-    const p = project(pl.x, pl.y, pl.h);
-    if (p) objects.push({ type: 'platform', d: pl, zc: p.zc });
-  });
   obstacles.forEach(obs => {
     const p = project(obs.x, obs.y, 0);
     if (p) objects.push({ type: 'obs', d: obs, zc: p.zc });
@@ -1166,8 +1164,7 @@ function render() {
   });
   objects.sort((a, b) => b.zc - a.zc);
   objects.forEach(o => {
-    if (o.type === 'platform') drawPlatform3D(o.d);
-    else if (o.type === 'obs')    drawObstacle3D(o.d);
+    if (o.type === 'obs')      drawObstacle3D(o.d);
     else if (o.type === 'portal') drawPortal3D();
     else if (o.type === 'player') drawPlayer3D(o.d);
     else if (o.type === 'rock')   drawRock3D(o.d);

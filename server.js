@@ -119,21 +119,35 @@ function handleKill(l, lid, killerId, victim) {
 }
 
 function triggerMeteorShower(l, lid, ownerId) {
-  for (let i = 0; i < 14; i++) {
+  // Target living enemies + random spots for saturation
+  const enemyPositions = Object.values(l.players)
+    .filter(p => p.alive && p.id !== ownerId)
+    .map(p => ({ x: p.x, y: p.y }));
+  for (let i = 0; i < 22; i++) {
     setTimeout(() => {
       if (!lobbies[lid]) return;
       const ll = lobbies[lid];
+      // Every other meteor targets a living enemy (with spread), rest random
+      let mx, my;
+      if (i % 2 === 0 && enemyPositions.length > 0) {
+        const target = enemyPositions[i % enemyPositions.length];
+        mx = target.x + (Math.random() - 0.5) * 180;
+        my = target.y + (Math.random() - 0.5) * 180;
+      } else {
+        mx = 120 + Math.random() * (MAP_W - 240);
+        my = 120 + Math.random() * (MAP_H - 240);
+      }
       ll.rocks.push({
         id: ll.rockCounter++,
-        x: 180 + Math.random() * (MAP_W - 360),
-        y: 180 + Math.random() * (MAP_H - 360),
-        vx: (Math.random() - 0.5) * 2,
-        vy: (Math.random() - 0.5) * 2,
-        z: 500 + Math.random() * 200,
-        vz: -9 - Math.random() * 4,
-        owner: ownerId, life: 300, bounces: 0, isMeteor: true
+        x: Math.max(80, Math.min(MAP_W - 80, mx)),
+        y: Math.max(80, Math.min(MAP_H - 80, my)),
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: (Math.random() - 0.5) * 1.5,
+        z: 480 + Math.random() * 200,
+        vz: -16 - Math.random() * 6,
+        owner: ownerId, life: 280, bounces: 0, isMeteor: true
       });
-    }, i * 280);
+    }, i * 180);
   }
 }
 
@@ -324,7 +338,7 @@ setInterval(() => {
         r.z += r.vz; r.life--;
         if (r.life <= 0) return false;
         if (r.z <= 0) {
-          const SPLASH = 95;
+          const SPLASH = 160;
           for (const pid in l.players) {
             if (pid === r.owner) continue;
             const p = l.players[pid];
