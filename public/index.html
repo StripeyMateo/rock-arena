@@ -84,6 +84,7 @@
     .rules-list li::before { content: '▸'; position: absolute; left: 0; color: orange; }
 
     .hint { margin-top: 1.2rem; font-size: 0.68rem; color: #333; letter-spacing: 1px; }
+    .setting-row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 0.82rem; color: #aaa; }
 
     /* GAME */
     #game { display: none; position: fixed; inset: 0; z-index: 2; }
@@ -107,6 +108,7 @@
   <div class="tab-bar">
     <button class="tab-btn active" onclick="showTab('play')">Play</button>
     <button class="tab-btn" onclick="showTab('rules')">How To Play</button>
+    <button class="tab-btn" onclick="showTab('settings')">Settings</button>
   </div>
 
   <!-- PLAY TAB -->
@@ -120,42 +122,71 @@
       <button class="lobby-btn" data-lobby="2">Lobby 2<br><span class="cnt">?/10</span></button>
       <button class="lobby-btn" data-lobby="3">Lobby 3<br><span class="cnt">?/10</span></button>
     </div>
-    <p class="hint">Move mouse to look around &nbsp;·&nbsp; WASD move &nbsp;·&nbsp; Right-click throw &nbsp;·&nbsp; F Kamehameha &nbsp;·&nbsp; Q shield &nbsp;·&nbsp; Space dash</p>
+    <p class="hint">WASD move &nbsp;·&nbsp; Mouse look &nbsp;·&nbsp; Right-click throw &nbsp;·&nbsp; E jump &nbsp;·&nbsp; Space dash &nbsp;·&nbsp; Q shield &nbsp;·&nbsp; F Kamehameha</p>
   </div>
 
   <!-- HOW TO PLAY TAB -->
   <div id="tab-rules" style="display:none">
     <div class="rules-section">
       <h3>Controls</h3>
-      <div class="key-row"><span class="key">W A S D</span> Move around</div>
-      <div class="key-row"><span class="key">Mouse</span> Look around / aim</div>
+      <div class="key-row"><span class="key">W A S D</span> Move (relative to where you're looking)</div>
+      <div class="key-row"><span class="key">Mouse</span> Look around / aim — click to capture mouse</div>
       <div class="key-row"><span class="key">Right click</span> Throw a rock (10 ammo max, refills over time)</div>
+      <div class="key-row"><span class="key">E</span> Jump — land on elevated stone platforms for height advantage</div>
       <div class="key-row"><span class="key">Space</span> Dash in your movement direction (3s cooldown)</div>
-      <div class="key-row"><span class="key">Q</span> Activate shield — blocks the next hit (8s cooldown)</div>
+      <div class="key-row"><span class="key">Q</span> Raise physical shield — deflects rocks back &amp; blocks Kamehameha</div>
       <div class="key-row"><span class="key">F</span> Hold to charge Kamehameha laser — releases after 1.5s</div>
     </div>
     <div class="rules-section">
       <h3>Rules</h3>
       <ul class="rules-list">
-        <li>Each player starts with 50 HP</li>
-        <li>Each rock hit deals 10 damage</li>
-        <li>Kamehameha laser deals 30 damage and passes through players</li>
-        <li>Rocks bounce off walls and cover rocks (up to 4 bounces)</li>
-        <li>Shield absorbs one hit completely — even Kamehameha</li>
-        <li>Last player alive wins the round</li>
-        <li>Up to 10 players per lobby across 3 lobbies</li>
+        <li>Each player starts with 75 HP — game is always ongoing, you respawn in 3s</li>
+        <li>Each rock hit deals 10 damage; Kamehameha deals 30 and pierces players</li>
+        <li>Rocks bounce off walls and pillars (up to 4 bounces) — gold glow = bounced</li>
+        <li>Shield deflects rocks back at the thrower and absorbs Kamehameha completely</li>
+        <li>Platforms give height advantage — players on them are safe from ground-level rocks</li>
+        <li>Get a 3-kill streak to call a meteor shower that rains fire on enemies</li>
+        <li>Walk into the purple portal (top of map) to return to the lobby any time</li>
+        <li>Up to 10 players per lobby across 3 always-live lobbies</li>
       </ul>
     </div>
     <div class="rules-section">
       <h3>Tips</h3>
       <ul class="rules-list">
-        <li>Use cover rocks to dodge — hide and peek out to throw</li>
-        <li>Bounced rocks glow gold and are harder to dodge</li>
-        <li>Save your shield for Kamehameha — it blocks it completely</li>
-        <li>Dash to escape tight situations or close the gap fast</li>
-        <li>The minimap (bottom right) shows all living players</li>
+        <li>Get on a platform — enemies can't hit you with ground rocks from below</li>
+        <li>Grind your kill streak: 3 kills unleashes meteors, then streak resets to 0</li>
+        <li>Shield deflects rocks back — bait an enemy throw then raise your shield</li>
+        <li>Dash to escape tight situations or close gaps fast</li>
+        <li>Compass at the top helps navigate — portal is always to the North</li>
+        <li>Purple dots on the minimap are platforms; the portal is also shown</li>
       </ul>
     </div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div id="tab-settings" style="display:none">
+    <div class="rules-section">
+      <h3>Mouse &amp; Camera</h3>
+      <div class="setting-row">
+        <span>Sensitivity</span>
+        <input type="range" min="0.001" max="0.009" step="0.0005"
+          value="0.003" oninput="updateSetting('sens',this.value)"
+          style="flex:1;margin:0 10px;accent-color:orange" />
+        <span id="sens-val" style="min-width:36px;color:orange;text-align:right">0.003</span>
+      </div>
+      <div class="setting-row">
+        <span>Field of View</span>
+        <input type="range" min="300" max="700" step="20"
+          value="500" oninput="updateSetting('fov',this.value)"
+          style="flex:1;margin:0 10px;accent-color:orange" />
+        <span id="fov-val" style="min-width:36px;color:orange;text-align:right">500</span>
+      </div>
+    </div>
+    <div class="rules-section">
+      <h3>Session Leaderboard</h3>
+      <div id="leaderboard-list" style="color:#888;font-size:0.8rem">Loading...</div>
+    </div>
+    <p class="hint" style="margin-top:0.8rem">Settings save automatically in your browser</p>
   </div>
 </div>
 
@@ -172,9 +203,32 @@
 
 <script>
   function showTab(name) {
-    document.getElementById('tab-play').style.display = name === 'play' ? 'block' : 'none';
-    document.getElementById('tab-rules').style.display = name === 'rules' ? 'block' : 'none';
-    document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', (i === 0) === (name === 'play')));
+    ['play','rules','settings'].forEach(t => {
+      document.getElementById('tab-' + t).style.display = t === name ? 'block' : 'none';
+    });
+    document.querySelectorAll('.tab-btn').forEach((b, i) => {
+      b.classList.toggle('active', ['play','rules','settings'][i] === name);
+    });
+    if (name === 'settings') loadLeaderboard();
+    // Sync slider displays from localStorage
+    const s = localStorage.getItem('ra_sens') || '0.003';
+    const f = localStorage.getItem('ra_fov')  || '500';
+    document.querySelector('[oninput*="sens"]').value = s;
+    document.getElementById('sens-val').textContent = parseFloat(s).toFixed(3);
+    document.querySelector('[oninput*="fov"]').value = f;
+    document.getElementById('fov-val').textContent = f;
+  }
+  function loadLeaderboard() {
+    fetch('/api/leaderboard').then(r => r.json()).then(data => {
+      const el = document.getElementById('leaderboard-list');
+      if (!data.length) { el.textContent = 'No kills recorded yet this session.'; return; }
+      el.innerHTML = data.map((e, i) =>
+        `<div style="padding:3px 0;display:flex;justify-content:space-between">
+          <span style="color:${i===0?'orange':i===1?'#ccc':i===2?'#cd7f32':'#888'}">${i+1}. ${e.name}</span>
+          <span style="color:${i===0?'orange':'#666'}">${e.kills} kills</span>
+        </div>`
+      ).join('');
+    }).catch(() => { document.getElementById('leaderboard-list').textContent = 'Connect to a server to view.'; });
   }
 </script>
 <script src="/socket.io/socket.io.js"></script>

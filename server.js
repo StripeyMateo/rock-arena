@@ -12,53 +12,60 @@ const io = new Server(httpServer, {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-const LOBBY_COUNT = 3;
-const MAX_PLAYERS = 10;
-const TICK_RATE = 60;
-const MAP_W = 1600;
-const MAP_H = 1200;
-const PLAYER_R = 20;
-const ROCK_R = 8;
-const PLAYER_SPEED = 3;
-const ROCK_SPEED = 8;
-const MAX_HP = 50;
-const HIT_DAMAGE = 10;
-const ROCK_COOLDOWN = 36;
-const KAME_COOLDOWN = 480;
-const KAME_BEAM_LEN = 3000;
-const KAME_BEAM_WIDTH = 35;
-const KAME_DAMAGE = 30;
-const DASH_FORCE = 14;
-const DASH_COOLDOWN = 180;
-const MAX_BOUNCES = 4;
+const LOBBY_COUNT    = 3;
+const MAX_PLAYERS    = 10;
+const TICK_RATE      = 60;
+const MAP_W          = 1600;
+const MAP_H          = 1200;
+const PLAYER_R       = 20;
+const ROCK_R         = 8;
+const PLAYER_SPEED   = 3;
+const ROCK_SPEED     = 8;
+const MAX_HP         = 75;
+const HIT_DAMAGE     = 10;
+const ROCK_COOLDOWN  = 36;
+const KAME_COOLDOWN  = 480;
+const KAME_BEAM_LEN  = 3000;
+const KAME_BEAM_WIDTH = 40;
+const KAME_DAMAGE    = 30;
+const DASH_FORCE     = 14;
+const DASH_COOLDOWN  = 180;
+const MAX_BOUNCES    = 4;
 const SHIELD_DURATION = 120;
 const SHIELD_COOLDOWN = 480;
-const MAX_AMMO = 10;
+const MAX_AMMO       = 10;
 const AMMO_REFILL_RATE = 180;
+const JUMP_FORCE     = 15;
+const GRAVITY        = 0.5;
+const RESPAWN_TIME   = 180; // ticks = 3 s
+const STREAK_TARGET  = 3;
 
-// Map obstacles — symmetrical arena with corridors and a central fort
+const PLATFORMS = [
+  { x: 480,  y: 390, r: 52, h: 72 },
+  { x: 1120, y: 390, r: 52, h: 72 },
+  { x: 480,  y: 810, r: 52, h: 72 },
+  { x: 1120, y: 810, r: 52, h: 72 },
+];
+
+const PORTAL_POS = { x: 800, y: 68, r: 34 };
+
 const OBSTACLES = [
-  // Central fort
-  { x: 800, y: 600, r: 62 },
-  // Inner ring (4 cover rocks)
-  { x: 800, y: 380, r: 42 },
-  { x: 800, y: 820, r: 42 },
-  { x: 575, y: 600, r: 42 },
+  { x: 800,  y: 600, r: 62 },
+  { x: 800,  y: 380, r: 42 },
+  { x: 800,  y: 820, r: 42 },
+  { x: 575,  y: 600, r: 42 },
   { x: 1025, y: 600, r: 42 },
-  // Corner fortresses
-  { x: 290, y: 240, r: 52 },
+  { x: 290,  y: 240, r: 52 },
   { x: 1310, y: 240, r: 52 },
-  { x: 290, y: 960, r: 52 },
+  { x: 290,  y: 960, r: 52 },
   { x: 1310, y: 960, r: 52 },
-  // Mid-edge cover
-  { x: 155, y: 600, r: 38 },
+  { x: 155,  y: 600, r: 38 },
   { x: 1445, y: 600, r: 38 },
-  { x: 800, y: 155, r: 38 },
-  { x: 800, y: 1045, r: 38 },
-  // Diagonal mid cover
-  { x: 480, y: 380, r: 28 },
+  { x: 800,  y: 155, r: 38 },
+  { x: 800,  y: 1045,r: 38 },
+  { x: 480,  y: 380, r: 28 },
   { x: 1120, y: 380, r: 28 },
-  { x: 480, y: 820, r: 28 },
+  { x: 480,  y: 820, r: 28 },
   { x: 1120, y: 820, r: 28 },
 ];
 
@@ -66,6 +73,8 @@ const lobbies = {};
 for (let i = 1; i <= LOBBY_COUNT; i++) {
   lobbies[i] = { id: i, players: {}, rocks: [], beams: [], rockCounter: 0 };
 }
+
+const sessionKills = {};
 
 function playerCount(id) { return Object.keys(lobbies[id].players).length; }
 
@@ -89,6 +98,40 @@ function pushOutObstacles(p) {
   });
 }
 
+function handleKill(l, lid, killerId, victim) {
+  const killer = l.players[killerId];
+  if (!killer) return;
+  killer.killStreak++;
+  sessionKills[killer.name] = (sessionKills[killer.name] || 0) + 1;
+  io.to(`lobby_${lid}`).emit('kill', {
+    killer: killer.name, victim: victim.name, streak: killer.killStreak
+  });
+  if (killer.killStreak >= STREAK_TARGET) {
+    killer.killStreak = 0;
+    io.to(`lobby_${lid}`).emit('meteor_shower', { shooter: killer.name });
+    triggerMeteorShower(l, lid, killerId);
+  }
+}
+
+function triggerMeteorShower(l, lid, ownerId) {
+  for (let i = 0; i < 14; i++) {
+    setTimeout(() => {
+      if (!lobbies[lid]) return;
+      const ll = lobbies[lid];
+      ll.rocks.push({
+        id: ll.rockCounter++,
+        x: 180 + Math.random() * (MAP_W - 360),
+        y: 180 + Math.random() * (MAP_H - 360),
+        vx: (Math.random() - 0.5) * 2,
+        vy: (Math.random() - 0.5) * 2,
+        z: 500 + Math.random() * 200,
+        vz: -9 - Math.random() * 4,
+        owner: ownerId, life: 300, bounces: 0, isMeteor: true
+      });
+    }, i * 280);
+  }
+}
+
 io.on('connection', (socket) => {
   let lobbyId = null;
   const id = socket.id;
@@ -101,8 +144,9 @@ io.on('connection', (socket) => {
     socket.join(`lobby_${lobby}`);
     l.players[id] = {
       id, name: (name || 'Player').slice(0, 16),
-      x: 150 + Math.random() * (MAP_W - 300),
-      y: 150 + Math.random() * (MAP_H - 300),
+      x: 200 + Math.random() * (MAP_W - 400),
+      y: 200 + Math.random() * (MAP_H - 400),
+      z: 0, vz: 0, onGround: true,
       hp: MAX_HP, alive: true,
       color: color || `hsl(${Math.floor(Math.random() * 360)},70%,60%)`,
       keys: { up: false, down: false, left: false, right: false },
@@ -110,9 +154,12 @@ io.on('connection', (socket) => {
       rockCooldown: 0, kameCooldown: 0, dashCooldown: 0,
       shieldActive: false, shieldTimer: 0, shieldCooldown: 0,
       ammo: MAX_AMMO, ammoTimer: 0,
-      lastHitBy: null
+      killStreak: 0, respawnTimer: 0, lastHitBy: null
     };
-    socket.emit('joined', { id, mapW: MAP_W, mapH: MAP_H, obstacles: OBSTACLES });
+    socket.emit('joined', {
+      id, mapW: MAP_W, mapH: MAP_H,
+      obstacles: OBSTACLES, platforms: PLATFORMS, portal: PORTAL_POS
+    });
   });
 
   socket.on('input', ({ keys, angle }) => {
@@ -122,20 +169,26 @@ io.on('connection', (socket) => {
     p.keys = keys; p.angle = angle;
   });
 
+  socket.on('jump', () => {
+    if (!lobbyId) return;
+    const p = lobbies[lobbyId].players[id];
+    if (!p || !p.alive || !p.onGround) return;
+    p.vz = JUMP_FORCE; p.onGround = false;
+  });
+
   socket.on('throw', ({ angle }) => {
     if (!lobbyId) return;
     const l = lobbies[lobbyId];
     const p = l.players[id];
     if (!p || !p.alive || p.rockCooldown > 0 || p.ammo <= 0) return;
-    p.rockCooldown = ROCK_COOLDOWN;
-    p.ammo--;
+    p.rockCooldown = ROCK_COOLDOWN; p.ammo--;
     l.rocks.push({
       id: l.rockCounter++,
       x: p.x + Math.cos(angle) * (PLAYER_R + ROCK_R + 2),
       y: p.y + Math.sin(angle) * (PLAYER_R + ROCK_R + 2),
-      vx: Math.cos(angle) * ROCK_SPEED,
-      vy: Math.sin(angle) * ROCK_SPEED,
-      owner: id, life: 220, bounces: 0
+      vx: Math.cos(angle) * ROCK_SPEED, vy: Math.sin(angle) * ROCK_SPEED,
+      z: p.z + 12, vz: 0,
+      owner: id, life: 220, bounces: 0, isMeteor: false
     });
   });
 
@@ -143,9 +196,7 @@ io.on('connection', (socket) => {
     if (!lobbyId) return;
     const p = lobbies[lobbyId].players[id];
     if (!p || !p.alive || p.shieldCooldown > 0 || p.shieldActive) return;
-    p.shieldActive = true;
-    p.shieldTimer = SHIELD_DURATION;
-    p.shieldCooldown = SHIELD_COOLDOWN;
+    p.shieldActive = true; p.shieldTimer = SHIELD_DURATION; p.shieldCooldown = SHIELD_COOLDOWN;
   });
 
   socket.on('dash', () => {
@@ -161,8 +212,7 @@ io.on('connection', (socket) => {
     if (p.keys.left)  { dvx += lefX; dvy += lefY; }
     if (p.keys.right) { dvx -= lefX; dvy -= lefY; }
     const dlen = Math.hypot(dvx, dvy) || 1;
-    p.vx = (dvx / dlen) * DASH_FORCE;
-    p.vy = (dvy / dlen) * DASH_FORCE;
+    p.vx = (dvx / dlen) * DASH_FORCE; p.vy = (dvy / dlen) * DASH_FORCE;
   });
 
   socket.on('kamehameha', ({ angle }) => {
@@ -181,13 +231,14 @@ io.on('connection', (socket) => {
         if (t.shieldActive) { t.shieldActive = false; t.shieldTimer = 0; continue; }
         t.hp -= KAME_DAMAGE;
         t.lastHitBy = id;
+        io.to(pid).emit('hit_flash');
         if (t.hp <= 0) {
-          t.hp = 0; t.alive = false;
-          io.to(`lobby_${lobbyId}`).emit('kill', { killer: p.name, victim: t.name });
+          t.hp = 0; t.alive = false; t.respawnTimer = RESPAWN_TIME;
+          handleKill(l, lobbyId, id, t);
         }
       }
     }
-    l.beams.push({ id: l.rockCounter++, x: p.x, y: p.y, angle, life: 30 });
+    l.beams.push({ id: l.rockCounter++, x: p.x, y: p.y, z: p.z + 22, angle, life: 30, owner: id });
   });
 
   socket.on('disconnect', () => {
@@ -199,16 +250,29 @@ io.on('connection', (socket) => {
 setInterval(() => {
   for (const lid in lobbies) {
     const l = lobbies[lid];
+    const portalExits = [];
+
     for (const pid in l.players) {
       const p = l.players[pid];
-      if (!p.alive) continue;
+
+      if (!p.alive) {
+        if (p.respawnTimer > 0) {
+          p.respawnTimer--;
+          if (p.respawnTimer === 0) {
+            p.alive = true; p.hp = MAX_HP;
+            p.x = 200 + Math.random() * (MAP_W - 400);
+            p.y = 200 + Math.random() * (MAP_H - 400);
+            p.z = 0; p.vz = 0; p.onGround = true;
+          }
+        }
+        continue;
+      }
 
       p.x += p.vx; p.y += p.vy;
       p.vx *= 0.78; p.vy *= 0.78;
       if (Math.abs(p.vx) < 0.1) p.vx = 0;
       if (Math.abs(p.vy) < 0.1) p.vy = 0;
 
-      // FPS-relative movement (WASD moves relative to facing direction)
       const fwdX = Math.cos(p.angle), fwdY = Math.sin(p.angle);
       const lefX = Math.sin(p.angle), lefY = -Math.cos(p.angle);
       if (p.keys.up)    { p.x += fwdX * PLAYER_SPEED; p.y += fwdY * PLAYER_SPEED; }
@@ -220,15 +284,64 @@ setInterval(() => {
       p.y = Math.max(PLAYER_R, Math.min(MAP_H - PLAYER_R, p.y));
       pushOutObstacles(p);
 
+      // Z physics
+      p.vz -= GRAVITY;
+      p.z += p.vz;
+      p.onGround = false;
+      if (p.z <= 0) { p.z = 0; p.vz = 0; p.onGround = true; }
+      for (const plat of PLATFORMS) {
+        const d = Math.hypot(p.x - plat.x, p.y - plat.y);
+        if (d < plat.r - PLAYER_R + 8 && p.vz <= 0 && p.z <= plat.h + 8 && p.z >= plat.h - 20) {
+          p.z = plat.h; p.vz = 0; p.onGround = true; break;
+        }
+      }
+
       if (p.rockCooldown > 0) p.rockCooldown--;
       if (p.kameCooldown > 0) p.kameCooldown--;
       if (p.dashCooldown > 0) p.dashCooldown--;
       if (p.shieldTimer > 0) { p.shieldTimer--; if (p.shieldTimer === 0) p.shieldActive = false; }
       if (p.shieldCooldown > 0 && !p.shieldActive) p.shieldCooldown--;
       if (p.ammo < MAX_AMMO) { p.ammoTimer++; if (p.ammoTimer >= AMMO_REFILL_RATE) { p.ammo++; p.ammoTimer = 0; } }
+
+      if (Math.hypot(p.x - PORTAL_POS.x, p.y - PORTAL_POS.y) < PORTAL_POS.r + PLAYER_R) {
+        portalExits.push(pid);
+      }
     }
 
+    portalExits.forEach(pid => {
+      io.to(pid).emit('portal_exit');
+      delete l.players[pid];
+    });
+
     l.rocks = l.rocks.filter(r => {
+      if (r.isMeteor) {
+        r.x += r.vx; r.y += r.vy;
+        r.z += r.vz; r.life--;
+        if (r.life <= 0) return false;
+        if (r.z <= 0) {
+          const SPLASH = 95;
+          for (const pid in l.players) {
+            if (pid === r.owner) continue;
+            const p = l.players[pid];
+            if (!p.alive) continue;
+            const dist = Math.hypot(r.x - p.x, r.y - p.y);
+            if (dist < SPLASH) {
+              const dmg = Math.round(HIT_DAMAGE * 1.8 * (1 - dist / SPLASH));
+              if (dmg <= 0) continue;
+              if (p.shieldActive) { p.shieldActive = false; p.shieldTimer = 0; continue; }
+              p.hp -= dmg; p.lastHitBy = r.owner;
+              io.to(pid).emit('hit_flash');
+              if (p.hp <= 0) {
+                p.hp = 0; p.alive = false; p.respawnTimer = RESPAWN_TIME;
+                handleKill(l, lid, r.owner, p);
+              }
+            }
+          }
+          return false;
+        }
+        return true;
+      }
+
       r.x += r.vx; r.y += r.vy; r.life--;
       if (r.life <= 0) return false;
       if (r.x < ROCK_R)         { r.x = ROCK_R;         r.vx *= -1; r.bounces++; }
@@ -252,14 +365,19 @@ setInterval(() => {
         if (pid === r.owner) continue;
         const p = l.players[pid];
         if (!p.alive) continue;
+        if (p.z > 50) continue; // elevated players safe from ground rocks
         if (Math.hypot(r.x - p.x, r.y - p.y) < PLAYER_R + ROCK_R) {
-          if (p.shieldActive) { p.shieldActive = false; p.shieldTimer = 0; return false; }
-          p.hp -= HIT_DAMAGE;
-          p.lastHitBy = r.owner;
+          if (p.shieldActive) {
+            p.shieldActive = false; p.shieldTimer = 0;
+            r.vx *= -1.1; r.vy *= -1.1; r.owner = pid; r.bounces++;
+            io.to(`lobby_${lid}`).emit('shield_block', { x: p.x, y: p.y });
+            return true;
+          }
+          p.hp -= HIT_DAMAGE; p.lastHitBy = r.owner;
+          io.to(pid).emit('hit_flash');
           if (p.hp <= 0) {
-            p.hp = 0; p.alive = false;
-            const killer = l.players[r.owner];
-            io.to(`lobby_${lid}`).emit('kill', { killer: killer?.name || '?', victim: p.name });
+            p.hp = 0; p.alive = false; p.respawnTimer = RESPAWN_TIME;
+            handleKill(l, lid, r.owner, p);
           }
           return false;
         }
@@ -272,20 +390,33 @@ setInterval(() => {
 
     io.to(`lobby_${lid}`).emit('state', {
       players: Object.values(l.players).map(p => ({
-        id: p.id, name: p.name, x: p.x, y: p.y,
+        id: p.id, name: p.name, x: p.x, y: p.y, z: p.z,
         hp: p.hp, alive: p.alive, color: p.color, angle: p.angle,
         ready: p.rockCooldown === 0, kamReady: p.kameCooldown === 0,
         dashCooldown: p.dashCooldown, shieldActive: p.shieldActive,
-        shieldCooldown: p.shieldCooldown, ammo: p.ammo
+        shieldCooldown: p.shieldCooldown, ammo: p.ammo,
+        killStreak: p.killStreak, respawnTimer: p.respawnTimer, onGround: p.onGround
       })),
-      rocks: l.rocks.map(r => ({ id: r.id, x: r.x, y: r.y, bounces: r.bounces })),
-      beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, angle: b.angle, life: b.life }))
+      rocks: l.rocks.map(r => ({
+        id: r.id, x: r.x, y: r.y,
+        z: (r.z !== undefined ? r.z : 14),
+        bounces: r.bounces, isMeteor: !!r.isMeteor
+      })),
+      beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z || 22, angle: b.angle, life: b.life, owner: b.owner }))
     });
   }
 }, 1000 / TICK_RATE);
 
 app.get('/api/lobbies', (req, res) => {
   res.json(Object.keys(lobbies).map(id => ({ id: parseInt(id), count: playerCount(id), max: MAX_PLAYERS })));
+});
+
+app.get('/api/leaderboard', (req, res) => {
+  const entries = Object.entries(sessionKills)
+    .map(([name, kills]) => ({ name, kills }))
+    .sort((a, b) => b.kills - a.kills)
+    .slice(0, 15);
+  res.json(entries);
 });
 
 const PORT = process.env.PORT || 3000;
