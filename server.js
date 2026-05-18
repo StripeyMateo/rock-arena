@@ -33,8 +33,8 @@ const DASH_COOLDOWN  = 180;
 const MAX_BOUNCES    = 4;
 const SHIELD_DURATION = 120;
 const SHIELD_COOLDOWN = 480;
-const MAX_AMMO       = 10;
-const AMMO_REFILL_RATE = 180;
+const MAX_AMMO       = 6;
+const AMMO_REFILL_RATE = 150;
 const JUMP_FORCE     = 15;
 const GRAVITY        = 0.5;
 const RESPAWN_TIME   = 180; // ticks = 3 s
@@ -108,8 +108,13 @@ function handleKill(l, lid, killerId, victim) {
   });
   if (killer.killStreak >= STREAK_TARGET) {
     killer.killStreak = 0;
-    io.to(`lobby_${lid}`).emit('meteor_shower', { shooter: killer.name });
-    triggerMeteorShower(l, lid, killerId);
+    const killerName = killer.name;
+    // Warn immediately, delay actual meteors by 3 seconds
+    io.to(`lobby_${lid}`).emit('meteor_shower', { shooter: killerName });
+    setTimeout(() => {
+      if (!lobbies[lid]) return;
+      triggerMeteorShower(lobbies[lid], lid, killerId);
+    }, 3000);
   }
 }
 
@@ -215,7 +220,7 @@ io.on('connection', (socket) => {
     p.vx = (dvx / dlen) * DASH_FORCE; p.vy = (dvy / dlen) * DASH_FORCE;
   });
 
-  socket.on('kamehameha', ({ angle }) => {
+  socket.on('kamehameha', ({ angle, pitch }) => {
     if (!lobbyId) return;
     const l = lobbies[lobbyId];
     const p = l.players[id];
@@ -238,7 +243,7 @@ io.on('connection', (socket) => {
         }
       }
     }
-    l.beams.push({ id: l.rockCounter++, x: p.x, y: p.y, z: p.z + 22, angle, life: 30, owner: id });
+    l.beams.push({ id: l.rockCounter++, x: p.x, y: p.y, z: p.z + 22, angle, pitch: pitch || 0, life: 30, owner: id });
   });
 
   socket.on('disconnect', () => {
@@ -402,7 +407,7 @@ setInterval(() => {
         z: (r.z !== undefined ? r.z : 14),
         bounces: r.bounces, isMeteor: !!r.isMeteor
       })),
-      beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z || 22, angle: b.angle, life: b.life, owner: b.owner }))
+      beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z || 22, angle: b.angle, pitch: b.pitch || 0, life: b.life, owner: b.owner }))
     });
   }
 }, 1000 / TICK_RATE);

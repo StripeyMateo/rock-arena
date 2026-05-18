@@ -33,7 +33,7 @@ const keys = { up: false, down: false, left: false, right: false };
 const hand = { state: 'idle', timer: 0, rockSent: false, dur: { windup: 11, throw: 7, recover: 18 } };
 const kame = { held: false, charge: 0, maxCharge: 90, cooldown: 0, maxCooldown: 480, firing: false, fireTimer: 0 };
 let dashCooldown = 0, shieldCooldown = 0, shieldActive = false;
-let myAmmo = 10, myHP = 75, myKillStreak = 0;
+let myAmmo = 6, myHP = 75, myKillStreak = 0, sessionKillCount = 0;
 const killFeed = [];
 let shieldRaise = 0;
 let hitFlash = 0;
@@ -129,6 +129,9 @@ socket.on('kill', ({ killer, victim, streak }) => {
   if (streak >= 2) msg += `  [${streak} streak]`;
   killFeed.unshift({ text: msg, timer: 300, isStreak: streak >= 3 });
   if (killFeed.length > 5) killFeed.pop();
+  // Track our own kills
+  const me = serverState?.players.find(p => p.id === myId);
+  if (me && killer === me.name) sessionKillCount++;
 });
 socket.on('hit_flash', () => { hitFlash = 1.0; });
 socket.on('shield_block', ({ x, y }) => {
@@ -237,7 +240,7 @@ setInterval(() => {
     if (kame.charge >= kame.maxCharge) {
       kame.held = false; kame.charge = 0;
       kame.cooldown = kame.maxCooldown; kame.firing = true; kame.fireTimer = 40;
-      socket.emit('kamehameha', { angle: worldAngle });
+      socket.emit('kamehameha', { angle: worldAngle, pitch: pitchAngle });
     }
   }
   if (kame.cooldown > 0) kame.cooldown--;
@@ -389,21 +392,6 @@ function drawObstacle3D(obs) {
     ctx.stroke();
   }
 
-  // Top cap ellipse
-  const top = project(obs.x, obs.y, OBS_H);
-  if (top) {
-    const topRw = obs.r * top.scale;
-    ctx.beginPath(); ctx.ellipse(top.sx, top.sy, topRw, topRw * 0.3, 0, 0, Math.PI * 2);
-    const tg = ctx.createRadialGradient(top.sx - topRw * 0.25, top.sy, 0, top.sx, top.sy, topRw);
-    tg.addColorStop(0, '#6a6e78'); tg.addColorStop(1, '#2e3040');
-    ctx.fillStyle = tg; ctx.fill();
-    ctx.strokeStyle = '#1e2030'; ctx.lineWidth = 1; ctx.stroke();
-  }
-
-  // Base ambient glow
-  ctx.beginPath(); ctx.ellipse(base.sx, base.sy, rw, rw * 0.25, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(60,90,180,0.1)'; ctx.fill();
-
   ctx.restore();
 }
 
@@ -536,17 +524,23 @@ function drawPlayer3D(p) {
 
   // Shield disc (large, held in front-left)
   if (p.shieldActive) {
-    const shX = base.sx - R * 1.4, shY = bodyY - R * 0.1;
-    ctx.beginPath(); ctx.ellipse(shX, shY, R * 0.85, R * 1.1, -0.2, 0, Math.PI * 2);
-    const shg = ctx.createRadialGradient(shX - R * 0.2, shY - R * 0.2, 0, shX, shY, R * 1.1);
+    const shX = base.sx - R * 2.0, shY = bodyY - R * 0.1;
+    ctx.beginPath(); ctx.ellipse(shX, shY, R * 1.4, R * 1.8, -0.2, 0, Math.PI * 2);
+    const shg = ctx.createRadialGradient(shX - R * 0.3, shY - R * 0.3, 0, shX, shY, R * 1.8);
     shg.addColorStop(0, 'rgba(200,240,255,0.95)');
     shg.addColorStop(0.5, 'rgba(60,160,240,0.8)');
     shg.addColorStop(1, 'rgba(20,80,180,0.5)');
     ctx.fillStyle = shg; ctx.fill();
-    ctx.strokeStyle = 'rgba(80,200,255,1)'; ctx.lineWidth = Math.max(1.5, sc * 2.5);
-    ctx.shadowColor = 'rgba(80,200,255,0.9)'; ctx.shadowBlur = 14; ctx.stroke();
-    ctx.beginPath(); ctx.ellipse(shX, shY, R * 0.5, R * 0.65, -0.2, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(200,240,255,0.4)'; ctx.lineWidth = 1; ctx.shadowBlur = 0; ctx.stroke();
+    ctx.strokeStyle = 'rgba(80,200,255,1)'; ctx.lineWidth = Math.max(2, sc * 3);
+    ctx.shadowColor = 'rgba(80,200,255,0.9)'; ctx.shadowBlur = 18; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(shX, shY, R * 0.8, R * 1.05, -0.2, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(200,240,255,0.45)'; ctx.lineWidth = 1.5; ctx.shadowBlur = 0; ctx.stroke();
+    // Star emblem
+    ctx.fillStyle = `rgba(255,255,255,0.22)`;
+    ctx.font = `bold ${Math.round(R * 0.9)}px Impact, fantasy`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('★', shX, shY);
+    ctx.textBaseline = 'alphabetic';
   }
 
   // Hands
@@ -649,69 +643,100 @@ function drawBeams3D() {
     const bz = b.z || 22;
 
     if (isOwn) {
-      // My own kame: perspective cone from hand area toward crosshair and beyond
+      // Own kame: perspective trapezoid cone – wide at hand, converges to crosshair, fires through it
       ctx.save();
-      // Hand origin (right side, lower screen)
-      const hx = CW * 0.60, hy2 = CH * 0.74;
-      // Crosshair center
-      const cx2 = CW / 2, cy2 = CH / 2;
-      // Direction vector from hand toward crosshair, extended far
+      const hx = CW * 0.60, hy2 = CH * 0.76;   // matches hand rest position
+      const cx2 = CW / 2, cy2 = CH / 2;         // crosshair / aim point
       const dx2 = cx2 - hx, dy2 = cy2 - hy2;
-      const dist = Math.sqrt(dx2 * dx2 + dy2 * dy2);
-      const nx = dx2 / dist, ny = dy2 / dist;
-      const farX = cx2 + nx * Math.max(CW, CH) * 1.8;
-      const farY = cy2 + ny * Math.max(CW, CH) * 1.8;
+      const dlen = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+      const nx = dx2 / dlen, ny = dy2 / dlen;
+      const perpX = -ny, perpY = nx;             // perpendicular direction
+      const ext = Math.max(CW, CH) * 2.4;
+      const farX = cx2 + nx * ext, farY = cy2 + ny * ext;
 
-      // Outer glow (wide near hand, tapers to point at far end)
-      const grad = ctx.createLinearGradient(hx, hy2, farX, farY);
-      grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
-      grad.addColorStop(0.08, `rgba(80,200,255,${alpha * 0.95})`);
-      grad.addColorStop(0.35, `rgba(255,240,80,${alpha * 0.7})`);
-      grad.addColorStop(1, 'rgba(80,200,255,0)');
-      ctx.lineCap = 'round';
-      // Draw as tapered beam using decreasing lineWidth via clipping trick
-      ctx.shadowColor = 'rgba(80,200,255,0.95)'; ctx.shadowBlur = 28 * alpha;
-      ctx.strokeStyle = grad; ctx.lineWidth = 38 * alpha;
-      ctx.beginPath(); ctx.moveTo(hx, hy2); ctx.lineTo(cx2, cy2); ctx.stroke();
-      ctx.lineWidth = 22 * alpha;
-      ctx.beginPath(); ctx.moveTo(cx2, cy2); ctx.lineTo(farX, farY); ctx.stroke();
-      // Inner white core
+      const handW = 60 * alpha;   // beam half-width at hand
+      const midW  = 10 * alpha;   // half-width at crosshair
+      const farW  = 4  * alpha;   // half-width at far end
+
+      // ── Outer glow trapezoid: hand → crosshair ──────────────
+      ctx.shadowColor = 'rgba(80,200,255,0.9)'; ctx.shadowBlur = 36 * alpha;
+      const trapGrad = ctx.createLinearGradient(hx, hy2, cx2, cy2);
+      trapGrad.addColorStop(0,   `rgba(255,255,255,${alpha * 0.9})`);
+      trapGrad.addColorStop(0.15,`rgba(80,200,255,${alpha * 0.85})`);
+      trapGrad.addColorStop(0.6, `rgba(255,240,80,${alpha * 0.65})`);
+      trapGrad.addColorStop(1,   `rgba(80,200,255,${alpha * 0.35})`);
+      ctx.beginPath();
+      ctx.moveTo(hx  + perpX * handW, hy2 + perpY * handW);
+      ctx.lineTo(cx2 + perpX * midW,  cy2 + perpY * midW);
+      ctx.lineTo(cx2 - perpX * midW,  cy2 - perpY * midW);
+      ctx.lineTo(hx  - perpX * handW, hy2 - perpY * handW);
+      ctx.closePath();
+      ctx.fillStyle = trapGrad; ctx.fill();
+
+      // ── Continuing beam past crosshair (thin tapering line) ─
+      ctx.shadowBlur = 0;
+      const farGrad = ctx.createLinearGradient(cx2, cy2, farX, farY);
+      farGrad.addColorStop(0, `rgba(80,200,255,${alpha * 0.8})`);
+      farGrad.addColorStop(1, 'rgba(80,200,255,0)');
+      ctx.beginPath();
+      ctx.moveTo(cx2 + perpX * midW, cy2 + perpY * midW);
+      ctx.lineTo(farX + perpX * farW, farY + perpY * farW);
+      ctx.lineTo(farX - perpX * farW, farY - perpY * farW);
+      ctx.lineTo(cx2 - perpX * midW, cy2 - perpY * midW);
+      ctx.closePath();
+      ctx.fillStyle = farGrad; ctx.fill();
+
+      // ── Bright white core line all the way through ──────────
+      ctx.shadowColor = 'rgba(255,255,255,0.9)'; ctx.shadowBlur = 12 * alpha;
       const coreGrad = ctx.createLinearGradient(hx, hy2, farX, farY);
-      coreGrad.addColorStop(0, `rgba(255,255,255,${alpha * 0.9})`);
-      coreGrad.addColorStop(0.5, `rgba(255,255,255,${alpha * 0.5})`);
-      coreGrad.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.strokeStyle = coreGrad; ctx.lineWidth = 10 * alpha; ctx.shadowBlur = 0;
+      coreGrad.addColorStop(0,   `rgba(255,255,255,${alpha})`);
+      coreGrad.addColorStop(0.35,`rgba(255,255,255,${alpha * 0.8})`);
+      coreGrad.addColorStop(1,   'rgba(255,255,255,0)');
+      ctx.strokeStyle = coreGrad; ctx.lineWidth = 5 * alpha; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(hx, hy2); ctx.lineTo(farX, farY); ctx.stroke();
-      // Screen flash
-      ctx.fillStyle = `rgba(80,200,255,${alpha * 0.07})`;
-      ctx.fillRect(0, 0, CW, CH);
+
+      // ── Hand origin burst ────────────────────────────────────
+      ctx.shadowBlur = 0;
+      const og = ctx.createRadialGradient(hx, hy2, 0, hx, hy2, 70 * alpha);
+      og.addColorStop(0,   `rgba(255,255,255,${alpha})`);
+      og.addColorStop(0.35,`rgba(80,200,255,${alpha * 0.8})`);
+      og.addColorStop(1,   'rgba(80,200,255,0)');
+      ctx.fillStyle = og; ctx.beginPath(); ctx.arc(hx, hy2, 70 * alpha, 0, Math.PI * 2); ctx.fill();
+
+      // Screen tint
+      ctx.fillStyle = `rgba(80,200,255,${alpha * 0.07})`; ctx.fillRect(0, 0, CW, CH);
       ctx.restore();
       return;
     }
 
+    // Other player's kame beam — use pitch for proper 3D direction
     const o = project(b.x, b.y, bz);
     if (!o) return;
-    const farX = b.x + Math.cos(b.angle) * 3000;
-    const farY = b.y + Math.sin(b.angle) * 3000;
-    const fp = project(farX, farY, bz);
+    const beamDist = 3000;
+    const bp = b.pitch || 0;
+    const farX = b.x + Math.cos(b.angle) * beamDist;
+    const farY = b.y + Math.sin(b.angle) * beamDist;
+    const farZ = bz + Math.tan(bp) * beamDist;
     let esx, esy;
+    const fp = project(farX, farY, farZ);
     if (fp && fp.zc > 0) { esx = fp.sx; esy = fp.sy; }
     else {
       const rel = b.angle - worldAngle;
       esx = o.sx + Math.sin(rel) * CW * 1.5;
       esy = o.sy - Math.cos(rel) * CH;
     }
-    const lw = Math.min(32, Math.max(3, 20 * alpha * Math.sqrt(Math.min(o.scale, 2))));
+    const lw = Math.min(40, Math.max(4, 26 * alpha * Math.sqrt(Math.min(o.scale, 2))));
     ctx.save();
+    ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(80,200,255,0.9)'; ctx.shadowBlur = 22 * alpha;
     const grad2 = ctx.createLinearGradient(o.sx, o.sy, esx, esy);
-    grad2.addColorStop(0, `rgba(255,255,255,${alpha})`);
-    grad2.addColorStop(0.12, `rgba(80,200,255,${alpha * 0.95})`);
+    grad2.addColorStop(0,    `rgba(255,255,255,${alpha})`);
+    grad2.addColorStop(0.1,  `rgba(80,200,255,${alpha * 0.95})`);
     grad2.addColorStop(0.45, `rgba(255,240,80,${alpha * 0.7})`);
-    grad2.addColorStop(1, 'rgba(80,200,255,0)');
-    ctx.strokeStyle = grad2; ctx.lineWidth = lw; ctx.lineCap = 'round';
-    ctx.shadowColor = 'rgba(80,200,255,0.9)'; ctx.shadowBlur = 18;
+    grad2.addColorStop(1,    'rgba(80,200,255,0)');
+    ctx.strokeStyle = grad2; ctx.lineWidth = lw;
     ctx.beginPath(); ctx.moveTo(o.sx, o.sy); ctx.lineTo(esx, esy); ctx.stroke();
-    ctx.strokeStyle = `rgba(255,255,255,${alpha * 0.85})`; ctx.lineWidth = lw * 0.22; ctx.shadowBlur = 0;
+    ctx.strokeStyle = `rgba(255,255,255,${alpha * 0.9})`; ctx.lineWidth = lw * 0.25; ctx.shadowBlur = 0;
     ctx.beginPath(); ctx.moveTo(o.sx, o.sy); ctx.lineTo(esx, esy); ctx.stroke();
     ctx.restore();
   });
@@ -735,10 +760,10 @@ function drawHand() {
   const me = serverState.players.find(p => p.id === myId);
   if (!me || !me.alive) return;
 
-  const rest    = { x: CW * 0.60,       y: CH * 0.74 };
-  const windup  = { x: CW * 0.60 + 90,  y: CH * 0.82 };
-  const throwP  = { x: CW * 0.60 - 90,  y: CH * 0.55 };
-  const armBase = { x: CW * 0.74,       y: CH * 1.08 };
+  const rest    = { x: CW * 0.60,       y: CH * 0.76 };
+  const windup  = { x: CW * 0.60 + 80,  y: CH * 0.84 };
+  const throwP  = { x: CW * 0.60 - 80,  y: CH * 0.57 };
+  const armBase = { x: CW * 0.72,       y: CH * 1.10 };
   const t = hand.timer / (hand.dur[hand.state] || 1);
   let hp;
   if (hand.state === 'idle')         hp = rest;
@@ -747,10 +772,10 @@ function drawHand() {
   else                               hp = { x: lerp(throwP.x, rest.x, t),   y: lerp(throwP.y, rest.y, t) };
 
   ctx.save(); ctx.lineCap = 'round';
-  const HR = 34;
-  ctx.lineWidth = 34; ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  const HR = 44;
+  ctx.lineWidth = 42; ctx.strokeStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath(); ctx.moveTo(armBase.x + 3, armBase.y + 3); ctx.lineTo(hp.x + 3, hp.y + 3); ctx.stroke();
-  ctx.lineWidth = 32; ctx.strokeStyle = me.color;
+  ctx.lineWidth = 40; ctx.strokeStyle = me.color;
   ctx.beginPath(); ctx.moveTo(armBase.x, armBase.y); ctx.lineTo(hp.x, hp.y); ctx.stroke();
   ctx.beginPath(); ctx.arc(hp.x, hp.y, HR, 0, Math.PI * 2);
   ctx.fillStyle = me.color; ctx.fill();
@@ -784,7 +809,7 @@ function drawHand() {
     ctx.lineWidth = 20; ctx.strokeStyle = me.color;
     ctx.beginPath(); ctx.moveTo(sbX, sbY); ctx.lineTo(stX, stY); ctx.stroke();
     ctx.save(); ctx.translate(stX, stY); ctx.rotate(-0.35 + (1 - sa) * 1.1);
-    const sw = 98 + sa * 30, sh = 120 + sa * 36;
+    const sw = 130 + sa * 38, sh = 158 + sa * 44;
     ctx.beginPath(); ctx.ellipse(0, 0, sw * 0.5, sh * 0.5, 0, 0, Math.PI * 2);
     const sdg = ctx.createRadialGradient(-sw * 0.18, -sh * 0.18, 0, 0, 0, sw * 0.65);
     sdg.addColorStop(0, `rgba(200,240,255,${0.95 * sa})`);
@@ -862,59 +887,113 @@ function drawHUD() {
   const alive = serverState.players.filter(p => p.alive).length;
   const total = serverState.players.length;
   const me = serverState.players.find(p => p.id === myId);
+  const myTotalKills = sessionKillCount;
 
-  // Alive counter
-  ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRect(ctx, CW-126, 10, 116, 32, 8); ctx.fill();
-  ctx.fillStyle = 'orange'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(`${alive} / ${total} alive`, CW - 68, 31);
+  // ── Top-right: Alive counter + kill count ─────────────────────
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.65)'; roundRect(ctx, CW - 168, 10, 158, 52, 10); ctx.fill();
+  ctx.fillStyle = 'orange'; ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(`${alive} / ${total}  ALIVE`, CW - 89, 32);
+  ctx.fillStyle = 'rgba(255,200,100,0.85)'; ctx.font = '12px sans-serif';
+  ctx.fillText(`YOUR KILLS: ${myTotalKills}`, CW - 89, 53);
+  ctx.restore();
 
   if (me?.alive) {
-    // HP bar
-    const bw = 200, bh = 13, bx = CW/2 - bw/2, by = CH - 22;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRect(ctx, bx-2, by-2, bw+4, bh+4, 6); ctx.fill();
-    ctx.fillStyle = '#0e0e0e'; ctx.fillRect(bx, by, bw, bh);
+    // ── HP bar ────────────────────────────────────────────────
+    const bw = 280, bh = 20, bx = CW/2 - bw/2, by = CH - 34;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.65)'; roundRect(ctx, bx - 4, by - 4, bw + 8, bh + 8, 8); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.fillRect(bx, by, bw, bh);
     const pct = me.hp / 75;
-    ctx.fillStyle = pct > 0.5 ? '#4caf50' : pct > 0.25 ? '#ff9800' : '#f44336';
+    const hpColor = pct > 0.6 ? '#4caf50' : pct > 0.3 ? '#ff9800' : '#f44336';
+    ctx.fillStyle = hpColor;
     ctx.fillRect(bx, by, bw * pct, bh);
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
-    ctx.fillStyle = 'white'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(`${me.hp} / 75 HP`, CW/2, by + bh - 1);
+    // HP bar glow
+    ctx.shadowColor = hpColor; ctx.shadowBlur = 8;
+    ctx.strokeStyle = hpColor; ctx.lineWidth = 1.5; ctx.strokeRect(bx, by, bw, bh);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'white'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 4;
+    ctx.fillText(`♥  ${me.hp} / 75`, CW/2, by + bh - 4);
+    ctx.shadowBlur = 0; ctx.restore();
 
-    // Kill streak display
+    // ── Kill streak ───────────────────────────────────────────
     if (myKillStreak > 0) {
-      const sc2 = Math.min(3, myKillStreak);
       ctx.save();
-      ctx.fillStyle = `rgba(255,${Math.max(60, 200 - myKillStreak * 40)},0,0.92)`;
-      ctx.font = `bold ${14 + myKillStreak * 2}px Impact, fantasy`;
-      ctx.textAlign = 'center'; ctx.shadowColor = 'rgba(255,80,0,0.8)'; ctx.shadowBlur = 10;
-      ctx.fillText(`${myKillStreak} KILL STREAK`, CW/2, CH - 42);
+      const pulse = 1 + Math.sin(Date.now() / 160) * 0.04;
+      ctx.fillStyle = `rgba(255,${Math.max(50, 200 - myKillStreak * 40)},0,0.95)`;
+      ctx.font = `bold ${Math.round((16 + myKillStreak * 3) * pulse)}px Impact, fantasy`;
+      ctx.textAlign = 'center'; ctx.shadowColor = 'rgba(255,80,0,0.9)'; ctx.shadowBlur = 14;
+      ctx.fillText(`🔥 ${myKillStreak} KILL STREAK`, CW/2, CH - 62);
+      // Streak pips
+      for (let i = 0; i < 3; i++) {
+        const px2 = CW/2 - 22 + i * 22, py2 = CH - 80;
+        ctx.beginPath(); ctx.arc(px2, py2, 6, 0, Math.PI * 2);
+        ctx.fillStyle = i < myKillStreak ? 'orange' : 'rgba(255,255,255,0.15)'; ctx.fill();
+        ctx.shadowBlur = i < myKillStreak ? 8 : 0;
+        ctx.strokeStyle = i < myKillStreak ? '#ffaa00' : '#333'; ctx.lineWidth = 1.5; ctx.stroke();
+      }
       ctx.shadowBlur = 0; ctx.restore();
     }
   }
 
-  // Ammo
-  for (let i = 0; i < 10; i++) {
-    const ax = CW/2 + 118 + i * 14, ay = CH - 16;
-    ctx.beginPath(); ctx.arc(ax, ay, 5, 0, Math.PI * 2);
-    ctx.fillStyle = i < myAmmo ? '#888' : 'rgba(255,255,255,0.08)'; ctx.fill();
-    if (i < myAmmo) { ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.stroke(); }
+  // ── Ammo (6 rocks) ────────────────────────────────────────────
+  ctx.save();
+  const ammoStartX = CW/2 + 152;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; roundRect(ctx, ammoStartX - 6, CH - 42, 6 * 22 + 4, 36, 6); ctx.fill();
+  for (let i = 0; i < 6; i++) {
+    const ax = ammoStartX + i * 22, ay = CH - 22;
+    const full = i < myAmmo;
+    ctx.beginPath(); ctx.arc(ax, ay, full ? 8 : 7, 0, Math.PI * 2);
+    if (full) {
+      const rg = ctx.createRadialGradient(ax - 2, ay - 2, 0, ax, ay, 8);
+      rg.addColorStop(0, '#cccccc'); rg.addColorStop(1, '#555555');
+      ctx.fillStyle = rg;
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    }
+    ctx.fill();
+    ctx.strokeStyle = full ? '#888' : 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1.5; ctx.stroke();
   }
+  ctx.fillStyle = 'rgba(200,200,200,0.6)'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('AMMO', ammoStartX + 6 * 11 - 11, CH - 42 + 10);
+  ctx.restore();
 
-  // Cooldown bars
+  // ── Cooldown ability bars (left side) ─────────────────────────
   const bars = [
-    { label: 'F — KAME',     ready: kame.cooldown <= 0,               pct: kame.cooldown <= 0 ? 1 : 1 - kame.cooldown / kame.maxCooldown, color: 'rgba(80,200,255,' },
-    { label: 'Q — SHIELD',   ready: shieldCooldown <= 0 && !shieldActive, pct: shieldActive ? 1 : shieldCooldown <= 0 ? 1 : 1 - shieldCooldown / 480, color: 'rgba(80,200,255,' },
-    { label: 'SPACE — DASH', ready: dashCooldown <= 0,                pct: dashCooldown <= 0 ? 1 : 1 - dashCooldown / 180, color: 'rgba(255,200,80,' },
+    { label: 'F  KAME',    ready: kame.cooldown <= 0,
+      pct: kame.cooldown <= 0 ? 1 : 1 - kame.cooldown / kame.maxCooldown,
+      color: [80, 200, 255], active: kame.firing },
+    { label: 'Q  SHIELD',  ready: shieldCooldown <= 0 && !shieldActive,
+      pct: shieldActive ? 1 : shieldCooldown <= 0 ? 1 : 1 - shieldCooldown / 480,
+      color: [100, 180, 255], active: shieldActive },
+    { label: '⎵  DASH',    ready: dashCooldown <= 0,
+      pct: dashCooldown <= 0 ? 1 : 1 - dashCooldown / 180,
+      color: [255, 200, 80], active: false },
   ];
+  ctx.save();
   bars.forEach((b, i) => {
-    const bx = 10, by2 = CH - 22 - (bars.length - i - 1) * 20, bw = 110, bh = 14;
-    ctx.fillStyle = 'rgba(0,0,0,0.45)'; roundRect(ctx, bx, by2, bw, bh, 4); ctx.fill();
-    ctx.fillStyle = b.color + (b.ready ? '0.85)' : '0.38)');
-    roundRect(ctx, bx, by2, bw * b.pct, bh, 4); ctx.fill();
-    ctx.fillStyle = b.ready ? 'white' : 'rgba(255,255,255,0.4)';
-    ctx.font = '8px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(b.label + (b.ready ? ' ✓' : ''), bx + bw/2, by2 + bh - 3);
+    const bx = 14, by2 = CH - 38 - (bars.length - 1 - i) * 28, bw = 140, bh = 20;
+    // Background
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; roundRect(ctx, bx, by2, bw, bh, 6); ctx.fill();
+    // Fill bar
+    const [r2, g2, b2] = b.color;
+    const barAlpha = b.ready ? 0.9 : 0.35;
+    ctx.fillStyle = `rgba(${r2},${g2},${b2},${barAlpha})`;
+    if (b.pct > 0) { roundRect(ctx, bx, by2, bw * b.pct, bh, 6); ctx.fill(); }
+    // Glow when ready/active
+    if (b.ready || b.active) {
+      ctx.shadowColor = `rgba(${r2},${g2},${b2},0.8)`; ctx.shadowBlur = 10;
+      ctx.strokeStyle = `rgba(${r2},${g2},${b2},0.6)`; ctx.lineWidth = 1.5;
+      roundRect(ctx, bx, by2, bw, bh, 6); ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    // Label
+    ctx.fillStyle = b.ready ? 'white' : 'rgba(255,255,255,0.45)';
+    ctx.font = `bold 10px sans-serif`; ctx.textAlign = 'left';
+    ctx.fillText(b.label + (b.ready ? '  ✓' : ''), bx + 8, by2 + bh - 5);
   });
+  ctx.restore();
 
   // Kill feed
   killFeed.forEach((k, i) => {
