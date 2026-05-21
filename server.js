@@ -42,7 +42,7 @@ const STREAK_TARGET    = 3;
 const HEAL_AMOUNT      = 10;
 const HEAL_COOLDOWN    = 360;  // 6 s
 const SHOCKWAVE_RADIUS = 420;
-const SHOCKWAVE_FORCE  = 55;
+const SHOCKWAVE_FORCE  = 68;
 const SHOCKWAVE_COOLDOWN = 720; // 12 s
 
 const PLATFORMS = [
@@ -464,8 +464,11 @@ setInterval(() => {
     }
 
     portalExits.forEach(pid => {
+      const leavingName = l.players[pid]?.name || 'Player';
       io.to(pid).emit('portal_exit');
       delete l.players[pid];
+      // Notify the rest of the lobby
+      io.to(`lobby_${lid}`).emit('player_left', { name: leavingName });
     });
 
     l.rocks = l.rocks.filter(r => {

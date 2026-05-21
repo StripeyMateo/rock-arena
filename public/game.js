@@ -175,6 +175,10 @@ socket.on('meteor_shower', ({ shooter }) => {
   if (killFeed.length > 5) killFeed.pop();
 });
 socket.on('portal_exit', () => returnToLobby());
+socket.on('player_left', ({ name }) => {
+  killFeed.unshift({ text: `${name} left the arena`, timer: 300, isLeave: true });
+  if (killFeed.length > 5) killFeed.pop();
+});
 
 socket.on('state', newState => {
   if (serverState) {
@@ -1124,12 +1128,23 @@ function drawHUD() {
   killFeed.forEach((k, i) => {
     k.timer--;
     const alpha = Math.min(1, k.timer / 40);
-    ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+    ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'right';
     const tw = ctx.measureText(k.text).width;
-    const bg = k.isStreak ? `rgba(60,10,0,${alpha * 0.7})` : `rgba(0,0,0,${alpha * 0.5})`;
-    ctx.fillStyle = bg; roundRect(ctx, CW - tw - 24, 50 + i * 23, tw + 14, 19, 4); ctx.fill();
-    ctx.fillStyle = k.isStreak ? `rgba(255,120,0,${alpha})` : `rgba(255,220,100,${alpha})`;
-    ctx.fillText(k.text, CW - 10, 64 + i * 23);
+    const rowH = 28, rowY = 54 + i * (rowH + 4);
+    const bg = k.isStreak ? `rgba(60,10,0,${alpha * 0.8})`
+             : k.isLeave  ? `rgba(60,0,0,${alpha * 0.75})`
+             : `rgba(0,0,0,${alpha * 0.6})`;
+    ctx.fillStyle = bg;
+    roundRect(ctx, CW - tw - 28, rowY, tw + 18, rowH, 6); ctx.fill();
+    // Coloured border left edge
+    ctx.fillStyle = k.isStreak ? `rgba(255,120,0,${alpha * 0.9})`
+                  : k.isLeave  ? `rgba(255,60,60,${alpha * 0.9})`
+                  : `rgba(255,180,0,${alpha * 0.6})`;
+    ctx.fillRect(CW - tw - 28, rowY, 3, rowH);
+    ctx.fillStyle = k.isStreak ? `rgba(255,140,0,${alpha})`
+                  : k.isLeave  ? `rgba(255,100,100,${alpha})`
+                  : `rgba(255,230,120,${alpha})`;
+    ctx.fillText(k.text, CW - 10, rowY + rowH - 8);
   });
   for (let i = killFeed.length - 1; i >= 0; i--) { if (killFeed[i].timer <= 0) killFeed.splice(i, 1); }
 
