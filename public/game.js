@@ -647,7 +647,7 @@ function drawBeams3D() {
     if (isOwn) {
       // Own kame: perspective trapezoid cone – wide at hand, converges to crosshair, fires through it
       ctx.save();
-      const hx = CW * 0.55, hy2 = CH * 0.80;   // matches hand rest position
+      const hx = CW / 2 + 30, hy2 = CH * 0.80;   // matches hand rest position
       const cx2 = CW / 2, cy2 = CH / 2;         // crosshair / aim point
       const dx2 = cx2 - hx, dy2 = cy2 - hy2;
       const dlen = Math.sqrt(dx2 * dx2 + dy2 * dy2);
@@ -711,10 +711,10 @@ function drawBeams3D() {
       return;
     }
 
-    // Other player's kame beam — use pitch for proper 3D direction
+    // Other player's kame beam — use pitch for proper 3D direction, len stops at walls
     const o = project(b.x, b.y, bz);
     if (!o) return;
-    const beamDist = 3000;
+    const beamDist = b.len || 3000;
     const bp = b.pitch || 0;
     const farX = b.x + Math.cos(b.angle) * beamDist;
     const farY = b.y + Math.sin(b.angle) * beamDist;
@@ -762,10 +762,10 @@ function drawHand() {
   const me = serverState.players.find(p => p.id === myId);
   if (!me || !me.alive) return;
 
-  const rest    = { x: CW * 0.55,       y: CH * 0.80 };
-  const windup  = { x: CW * 0.55 + 70,  y: CH * 0.87 };
-  const throwP  = { x: CW * 0.55 - 70,  y: CH * 0.60 };
-  const armBase = { x: CW * 0.57,       y: CH * 1.12 };
+  const rest    = { x: CW / 2 + 30,  y: CH * 0.80 };
+  const windup  = { x: CW / 2 + 90,  y: CH * 0.87 };
+  const throwP  = { x: CW / 2 - 40,  y: CH * 0.61 };
+  const armBase = { x: CW / 2 + 42,  y: CH * 1.12 };
   const t = hand.timer / (hand.dur[hand.state] || 1);
   let hp;
   if (hand.state === 'idle')         hp = rest;
@@ -806,9 +806,9 @@ function drawHand() {
     const sbX = CW / 2 - 110, sbY = CH + 30;
     const stX = CW / 2 - 190 + sa * 18, stY = lerp(CH + 20, CH - 195, sa);
     ctx.save(); ctx.lineCap = 'round';
-    ctx.lineWidth = 22; ctx.strokeStyle = `rgba(0,0,0,${0.3 * sa})`;
-    ctx.beginPath(); ctx.moveTo(sbX + 2, sbY + 2); ctx.lineTo(stX + 2, stY + 2); ctx.stroke();
-    ctx.lineWidth = 20; ctx.strokeStyle = me.color;
+    ctx.lineWidth = 54; ctx.strokeStyle = `rgba(0,0,0,${0.32 * sa})`;
+    ctx.beginPath(); ctx.moveTo(sbX + 3, sbY + 3); ctx.lineTo(stX + 3, stY + 3); ctx.stroke();
+    ctx.lineWidth = 50; ctx.strokeStyle = me.color;
     ctx.beginPath(); ctx.moveTo(sbX, sbY); ctx.lineTo(stX, stY); ctx.stroke();
     ctx.save(); ctx.translate(stX, stY); ctx.rotate(-0.35 + (1 - sa) * 1.1);
     const sw = 108 + sa * 24, sh = 130 + sa * 30;
@@ -840,7 +840,7 @@ function drawHand() {
   // Kame charge orb
   if (kame.charge > 0 || kame.firing) {
     const ratio = kame.firing ? 1 : kame.charge / kame.maxCharge;
-    const kcx = CW * 0.55, kcy = CH * 0.80, kr = 8 + ratio * 48;
+    const kcx = CW / 2 + 30, kcy = CH * 0.80, kr = 8 + ratio * 48;
     ctx.save();
     const kg = ctx.createRadialGradient(kcx, kcy, 0, kcx, kcy, kr);
     kg.addColorStop(0, `rgba(255,255,255,${ratio})`);

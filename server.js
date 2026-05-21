@@ -28,7 +28,7 @@ const KAME_COOLDOWN  = 480;
 const KAME_BEAM_LEN  = 3000;
 const KAME_BEAM_WIDTH = 40;
 const KAME_DAMAGE    = 30;
-const DASH_FORCE     = 14;
+const DASH_FORCE     = 22;
 const DASH_COOLDOWN  = 180;
 const MAX_BOUNCES    = 4;
 const SHIELD_DURATION = 120;
@@ -49,7 +49,8 @@ const PLATFORMS = [
 
 const PORTAL_POS = { x: 800, y: 68, r: 34 };
 
-const OBSTACLES = [
+// Lobby 1 — Central Cluster (original layout)
+const OBSTACLES_1 = [
   { x: 800,  y: 600, r: 62 },
   { x: 800,  y: 380, r: 42 },
   { x: 800,  y: 820, r: 42 },
@@ -69,9 +70,55 @@ const OBSTACLES = [
   { x: 1120, y: 820, r: 28 },
 ];
 
+// Lobby 2 — Grid Arena (evenly-spaced pillars)
+const OBSTACLES_2 = [
+  { x: 400,  y: 300, r: 55 },
+  { x: 800,  y: 300, r: 40 },
+  { x: 1200, y: 300, r: 55 },
+  { x: 400,  y: 600, r: 48 },
+  { x: 800,  y: 600, r: 72 },
+  { x: 1200, y: 600, r: 48 },
+  { x: 400,  y: 900, r: 55 },
+  { x: 800,  y: 900, r: 40 },
+  { x: 1200, y: 900, r: 55 },
+  { x: 160,  y: 160, r: 38 },
+  { x: 1440, y: 160, r: 38 },
+  { x: 160,  y: 1040,r: 38 },
+  { x: 1440, y: 1040,r: 38 },
+  { x: 160,  y: 450, r: 32 },
+  { x: 1440, y: 450, r: 32 },
+  { x: 160,  y: 750, r: 32 },
+  { x: 1440, y: 750, r: 32 },
+];
+
+// Lobby 3 — Ring Arena (outer ring, open center)
+const OBSTACLES_3 = [
+  { x: 800,  y: 600, r: 55 },
+  { x: 800,  y: 185, r: 52 },
+  { x: 800,  y: 1015,r: 52 },
+  { x: 220,  y: 600, r: 52 },
+  { x: 1380, y: 600, r: 52 },
+  { x: 400,  y: 300, r: 44 },
+  { x: 1200, y: 300, r: 44 },
+  { x: 400,  y: 900, r: 44 },
+  { x: 1200, y: 900, r: 44 },
+  { x: 580,  y: 175, r: 32 },
+  { x: 1020, y: 175, r: 32 },
+  { x: 580,  y: 1025,r: 32 },
+  { x: 1020, y: 1025,r: 32 },
+  { x: 175,  y: 380, r: 30 },
+  { x: 1425, y: 380, r: 30 },
+  { x: 175,  y: 820, r: 30 },
+  { x: 1425, y: 820, r: 30 },
+];
+
+const LOBBY_OBSTACLES = { 1: OBSTACLES_1, 2: OBSTACLES_2, 3: OBSTACLES_3 };
+// Keep a default for any shared server logic that needs an obstacle list
+const OBSTACLES = OBSTACLES_1;
+
 const lobbies = {};
 for (let i = 1; i <= LOBBY_COUNT; i++) {
-  lobbies[i] = { id: i, players: {}, rocks: [], beams: [], rockCounter: 0 };
+  lobbies[i] = { id: i, players: {}, rocks: [], beams: [], rockCounter: 0, obstacles: LOBBY_OBSTACLES[i] };
 }
 
 const sessionKills = {};
@@ -86,8 +133,8 @@ function distToSegment(px, py, ax, ay, bx, by) {
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-function pushOutObstacles(p) {
-  OBSTACLES.forEach(obs => {
+function pushOutObstacles(p, obsArray) {
+  obsArray.forEach(obs => {
     const dx = p.x - obs.x, dy = p.y - obs.y;
     const dist = Math.hypot(dx, dy);
     if (dist < PLAYER_R + obs.r) {
@@ -96,6 +143,22 @@ function pushOutObstacles(p) {
       p.y = obs.y + Math.sin(ang) * (PLAYER_R + obs.r + 1);
     }
   });
+}
+
+// Returns how far (in world units) a beam travels before hitting a wall
+function getKameBeamLength(startX, startY, angle, obsArray) {
+  const cdx = Math.cos(angle), cdy = Math.sin(angle);
+  let len = KAME_BEAM_LEN;
+  for (const obs of obsArray) {
+    const dx = obs.x - startX, dy = obs.y - startY;
+    const proj = dx * cdx + dy * cdy;
+    if (proj <= 0) continue;
+    const perp = Math.abs(-dx * cdy + dy * cdx);
+    if (perp >= obs.r) continue;
+    const entry = proj - Math.sqrt(obs.r * obs.r - perp * perp);
+    if (entry > 0 && entry < len) len = entry;
+  }
+  return len;
 }
 
 function handleKill(l, lid, killerId, victim) {
@@ -134,13 +197,13 @@ function triggerMeteorShower(l, lid, ownerId) {
         mx = target.x + (Math.random() - 0.5) * 180;
         my = target.y + (Math.random() - 0.5) * 180;
       } else {
-        mx = 120 + Math.random() * (MAP_W - 240);
-        my = 120 + Math.random() * (MAP_H - 240);
+        mx = 60 + Math.random() * (MAP_W - 120);
+        my = 60 + Math.random() * (MAP_H - 120);
       }
       ll.rocks.push({
         id: ll.rockCounter++,
-        x: Math.max(80, Math.min(MAP_W - 80, mx)),
-        y: Math.max(80, Math.min(MAP_H - 80, my)),
+        x: Math.max(40, Math.min(MAP_W - 40, mx)),
+        y: Math.max(40, Math.min(MAP_H - 40, my)),
         vx: (Math.random() - 0.5) * 1.5,
         vy: (Math.random() - 0.5) * 1.5,
         z: 480 + Math.random() * 200,
@@ -177,7 +240,8 @@ io.on('connection', (socket) => {
     };
     socket.emit('joined', {
       id, mapW: MAP_W, mapH: MAP_H,
-      obstacles: OBSTACLES, platforms: PLATFORMS, portal: PORTAL_POS
+      obstacles: l.obstacles, platforms: PLATFORMS, portal: PORTAL_POS,
+      lobbyId: lobby
     });
   });
 
@@ -240,24 +304,38 @@ io.on('connection', (socket) => {
     const p = l.players[id];
     if (!p || !p.alive || p.kameCooldown > 0) return;
     p.kameCooldown = KAME_COOLDOWN;
-    const bx2 = p.x + Math.cos(angle) * KAME_BEAM_LEN;
-    const by2 = p.y + Math.sin(angle) * KAME_BEAM_LEN;
+    // Beam stops at first wall — find actual endpoint
+    const beamLen = getKameBeamLength(p.x, p.y, angle, l.obstacles);
+    const bx2 = p.x + Math.cos(angle) * beamLen;
+    const by2 = p.y + Math.sin(angle) * beamLen;
+    // Sort players by distance so shield closest to shooter blocks everyone behind
+    const inBeam = [];
     for (const pid in l.players) {
       if (pid === id) continue;
       const t = l.players[pid];
       if (!t.alive) continue;
       if (distToSegment(t.x, t.y, p.x, p.y, bx2, by2) < KAME_BEAM_WIDTH) {
-        if (t.shieldActive) { t.shieldActive = false; t.shieldTimer = 0; continue; }
-        t.hp -= KAME_DAMAGE;
-        t.lastHitBy = id;
-        io.to(pid).emit('hit_flash');
-        if (t.hp <= 0) {
-          t.hp = 0; t.alive = false; t.respawnTimer = RESPAWN_TIME;
-          handleKill(l, lobbyId, id, t);
-        }
+        const d = Math.hypot(t.x - p.x, t.y - p.y);
+        inBeam.push({ pid, t, d });
       }
     }
-    l.beams.push({ id: l.rockCounter++, x: p.x, y: p.y, z: p.z + 22, angle, pitch: pitch || 0, life: 30, owner: id });
+    inBeam.sort((a, b) => a.d - b.d);
+    for (const { pid, t } of inBeam) {
+      if (t.shieldActive) {
+        // Shield blocks beam — stop here, no one behind gets hit
+        t.shieldActive = false; t.shieldTimer = 0;
+        io.to(`lobby_${lobbyId}`).emit('shield_block', { x: t.x, y: t.y });
+        break;
+      }
+      t.hp -= KAME_DAMAGE; t.lastHitBy = id;
+      io.to(pid).emit('hit_flash');
+      if (t.hp <= 0) {
+        t.hp = 0; t.alive = false; t.respawnTimer = RESPAWN_TIME;
+        handleKill(l, lobbyId, id, t);
+      }
+    }
+    // Store actual beam length so client can render it stopping at wall
+    l.beams.push({ id: l.rockCounter++, x: p.x, y: p.y, z: p.z + 22, angle, pitch: pitch || 0, life: 30, owner: id, len: beamLen });
   });
 
   socket.on('disconnect', () => {
@@ -301,7 +379,7 @@ setInterval(() => {
 
       p.x = Math.max(PLAYER_R, Math.min(MAP_W - PLAYER_R, p.x));
       p.y = Math.max(PLAYER_R, Math.min(MAP_H - PLAYER_R, p.y));
-      pushOutObstacles(p);
+      pushOutObstacles(p, l.obstacles);
 
       // Z physics
       p.vz -= GRAVITY;
@@ -338,17 +416,19 @@ setInterval(() => {
         r.z += r.vz; r.life--;
         if (r.life <= 0) return false;
         if (r.z <= 0) {
-          const SPLASH = 160;
+          const SPLASH = 170;
+          const METEOR_DMG = 5;
+          const HIT_CHANCE = 0.60;
           for (const pid in l.players) {
+            // Owner is always immune — check both pid and p.id for safety
             if (pid === r.owner) continue;
             const p = l.players[pid];
-            if (!p.alive) continue;
+            if (!p || !p.alive || p.id === r.owner) continue;
             const dist = Math.hypot(r.x - p.x, r.y - p.y);
             if (dist < SPLASH) {
-              const dmg = Math.round(HIT_DAMAGE * 1.8 * (1 - dist / SPLASH));
-              if (dmg <= 0) continue;
+              if (Math.random() > HIT_CHANCE) continue; // 60% hit chance
               if (p.shieldActive) { p.shieldActive = false; p.shieldTimer = 0; continue; }
-              p.hp -= dmg; p.lastHitBy = r.owner;
+              p.hp -= METEOR_DMG; p.lastHitBy = r.owner;
               io.to(pid).emit('hit_flash');
               if (p.hp <= 0) {
                 p.hp = 0; p.alive = false; p.respawnTimer = RESPAWN_TIME;
@@ -368,7 +448,7 @@ setInterval(() => {
       if (r.y < ROCK_R)         { r.y = ROCK_R;         r.vy *= -1; r.bounces++; }
       if (r.y > MAP_H - ROCK_R) { r.y = MAP_H - ROCK_R; r.vy *= -1; r.bounces++; }
       if (r.bounces > MAX_BOUNCES) return false;
-      for (const obs of OBSTACLES) {
+      for (const obs of l.obstacles) {
         const dx = r.x - obs.x, dy = r.y - obs.y;
         const dist = Math.hypot(dx, dy);
         if (dist < ROCK_R + obs.r) {
@@ -421,7 +501,7 @@ setInterval(() => {
         z: (r.z !== undefined ? r.z : 14),
         bounces: r.bounces, isMeteor: !!r.isMeteor
       })),
-      beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z || 22, angle: b.angle, pitch: b.pitch || 0, life: b.life, owner: b.owner }))
+      beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z || 22, angle: b.angle, pitch: b.pitch || 0, life: b.life, owner: b.owner, len: b.len || KAME_BEAM_LEN }))
     });
   }
 }, 1000 / TICK_RATE);
