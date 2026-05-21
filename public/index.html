@@ -180,17 +180,17 @@
       <h3>Mouse &amp; Camera</h3>
       <div class="setting-row">
         <span>Sensitivity</span>
-        <input type="range" min="0.001" max="0.009" step="0.0005"
-          value="0.003" oninput="updateSetting('sens',this.value)"
+        <input type="range" min="1" max="9" step="0.5"
+          value="3" oninput="updateSetting('sens',this.value)"
           style="flex:1;margin:0 10px;accent-color:orange" />
-        <span id="sens-val" style="min-width:36px;color:orange;text-align:right">0.003</span>
+        <span id="sens-val" style="min-width:36px;color:orange;text-align:right">3</span>
       </div>
       <div class="setting-row">
         <span>Field of View</span>
         <input type="range" min="50" max="110" step="5"
-          value="70" oninput="updateSetting('fov',this.value)"
+          value="110" oninput="updateSetting('fov',this.value)"
           style="flex:1;margin:0 10px;accent-color:orange" />
-        <span id="fov-val" style="min-width:40px;color:orange;text-align:right">70°</span>
+        <span id="fov-val" style="min-width:40px;color:orange;text-align:right">110°</span>
       </div>
     </div>
     <div class="rules-section">
@@ -256,10 +256,11 @@
     if (name === 'settings') loadLeaderboard();
     if (name === 'killfx') initKillFXTab();
     // Sync slider displays from localStorage
-    const s = localStorage.getItem('ra_sens') || '0.003';
-    const f = localStorage.getItem('ra_fov_deg') || '70';
-    document.querySelector('[oninput*="sens"]').value = s;
-    document.getElementById('sens-val').textContent = parseFloat(s).toFixed(3);
+    const rawS = parseFloat(localStorage.getItem('ra_sens') || '3');
+    const sDisplay = rawS < 0.1 ? Math.round(rawS * 1000 * 10) / 10 : rawS; // migrate old format
+    const f = localStorage.getItem('ra_fov_deg') || '110';
+    document.querySelector('[oninput*="sens"]').value = sDisplay;
+    document.getElementById('sens-val').textContent = sDisplay % 1 === 0 ? sDisplay.toFixed(0) : sDisplay.toFixed(1);
     document.querySelector('[oninput*="fov"]').value = f;
     document.getElementById('fov-val').textContent = Math.round(parseFloat(f)) + '°';
   }

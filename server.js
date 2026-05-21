@@ -41,8 +41,8 @@ const RESPAWN_TIME     = 180; // ticks = 3 s
 const STREAK_TARGET    = 3;
 const HEAL_AMOUNT      = 10;
 const HEAL_COOLDOWN    = 360;  // 6 s
-const SHOCKWAVE_RADIUS = 380;
-const SHOCKWAVE_FORCE  = 35;
+const SHOCKWAVE_RADIUS = 420;
+const SHOCKWAVE_FORCE  = 55;
 const SHOCKWAVE_COOLDOWN = 720; // 12 s
 
 const PLATFORMS = [

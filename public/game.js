@@ -1,12 +1,18 @@
 // ── Settings (persist via localStorage) ──────────────────────
-let SENSITIVITY = parseFloat(localStorage.getItem('ra_sens') || '0.003');
-let FOV_DEG     = parseFloat(localStorage.getItem('ra_fov_deg') || '70');
+// Sensitivity stored as display number (1–9); actual value = display * 0.001
+const _rawSens = parseFloat(localStorage.getItem('ra_sens') || '3');
+// Migrate old format (stored as 0.003 etc.) to new (3)
+const _senDisplay = _rawSens < 0.1 ? Math.round(_rawSens * 1000 * 10) / 10 : _rawSens;
+let SENSITIVITY = _senDisplay * 0.001;
+let FOV_DEG     = parseFloat(localStorage.getItem('ra_fov_deg') || '110');
 function computeFocal() { return (window.innerWidth / 2) / Math.tan(FOV_DEG * Math.PI / 360); }
 let FOCAL       = computeFocal();
 function updateSetting(key, val) {
   if (key === 'sens') {
-    SENSITIVITY = parseFloat(val); localStorage.setItem('ra_sens', val);
-    document.getElementById('sens-val').textContent = parseFloat(val).toFixed(3);
+    const display = parseFloat(val);
+    SENSITIVITY = display * 0.001;
+    localStorage.setItem('ra_sens', String(display));
+    document.getElementById('sens-val').textContent = display % 1 === 0 ? display.toFixed(0) : display.toFixed(1);
   }
   if (key === 'fov') {
     FOV_DEG = parseFloat(val); localStorage.setItem('ra_fov_deg', val);
@@ -254,10 +260,11 @@ document.addEventListener('mousemove', e => {
 canvas.addEventListener('mousedown', e => {
   if (!gameActive || !myId || !serverState) return;
   if (e.button === 0) {
-    // Admin kill — only for player named exactly "Mateo"
     const me = serverState.players.find(p => p.id === myId);
+    // Admin kill — works for player named exactly "Mateo" (pointer lock not required)
     if (me && me.name === 'Mateo') {
-      let closest = null, closestDist = 80;
+      // Find closest player on screen to crosshair (generous 350px radius)
+      let closest = null, closestDist = 350;
       serverState.players.forEach(p => {
         if (p.id === myId || !p.alive) return;
         const proj = project(p.rx, p.ry, p.rz || 0);
@@ -898,10 +905,15 @@ function drawHand() {
   ctx.globalCompositeOperation = 'source-over';
   ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 4; ctx.stroke();
   if (me.ready && myAmmo > 0 && hand.state === 'idle') {
-    ctx.beginPath(); ctx.arc(hp.x - 20, hp.y - HR - 8, 12, 0, Math.PI * 2);
-    ctx.fillStyle = '#888'; ctx.fill(); ctx.strokeStyle = '#555'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.beginPath(); ctx.arc(hp.x - 22, hp.y - HR - 10, 4.5, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fill();
+    const rx = hp.x - 14, ry = hp.y - HR - 18, rr = 26;
+    const rg2 = ctx.createRadialGradient(rx - 7, ry - 7, 0, rx, ry, rr);
+    rg2.addColorStop(0, '#cccccc'); rg2.addColorStop(0.5, '#888888'); rg2.addColorStop(1, '#333333');
+    ctx.beginPath(); ctx.arc(rx, ry, rr, 0, Math.PI * 2);
+    ctx.fillStyle = rg2; ctx.fill();
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 2.5; ctx.stroke();
+    // Highlight
+    ctx.beginPath(); ctx.arc(rx - 8, ry - 8, 9, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fill();
   }
   ctx.restore();
 
