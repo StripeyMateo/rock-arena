@@ -37,13 +37,16 @@ const keys = { up: false, down: false, left: false, right: false };
 const hand = { state: 'idle', timer: 0, rockSent: false, dur: { windup: 11, throw: 7, recover: 18 } };
 const kame = { held: false, charge: 0, maxCharge: 90, cooldown: 0, maxCooldown: 480, firing: false, fireTimer: 0 };
 let dashCooldown = 0, shieldCooldown = 0, shieldActive = false;
+let healCooldown = 0, shockwaveCooldown = 0;
 let myAmmo = 6, myHP = 75, myKillStreak = 0, sessionKillCount = 0;
 const killFeed = [];
 let shieldRaise = 0;
 let hitFlash = 0;
+let healFlash = 0;
 let meteorShake = 0;
 let prevHP = 75;
 let shieldBlockFX = [];
+let shockwaveFX = [];   // { x, y, r, maxR, timer, maxTimer }
 let meteorWarning = 0;
 
 // ── Canvas ─────────────────────────────────────────────────────
@@ -138,6 +141,10 @@ socket.on('kill', ({ killer, victim, streak }) => {
   if (me && killer === me.name) sessionKillCount++;
 });
 socket.on('hit_flash', () => { hitFlash = 1.0; });
+socket.on('healed', () => { healFlash = 1.0; });
+socket.on('shockwave_fx', ({ x, y, r }) => {
+  shockwaveFX.push({ x, y, maxR: r, timer: 40, maxTimer: 40 });
+});
 socket.on('shield_block', ({ x, y }) => {
   shieldBlockFX.push({ x, y, timer: 30 });
 });
@@ -170,6 +177,7 @@ socket.on('state', newState => {
     prevHP = myHP;
     myAmmo = me.ammo; dashCooldown = me.dashCooldown;
     shieldCooldown = me.shieldCooldown; shieldActive = me.shieldActive;
+    healCooldown = me.healCooldown || 0; shockwaveCooldown = me.shockwaveCooldown || 0;
     myHP = me.hp; myKillStreak = me.killStreak;
     camX = me.x; camY = me.y; camZ = me.z || 0;
   }
@@ -209,6 +217,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'f' || e.key === 'F') kame.held = true;
   if (e.key === ' ') { e.preventDefault(); socket.emit('dash'); }
   if (e.key === 'q' || e.key === 'Q') socket.emit('shield');
+  if (e.key === 'e' || e.key === 'E') socket.emit('heal');
+  if (e.key === 'r' || e.key === 'R') socket.emit('shockwave');
 });
 document.addEventListener('keyup', e => {
   if (!gameActive) return;
@@ -265,7 +275,9 @@ setInterval(() => {
   if (meteorShake > 0) meteorShake--;
   if (meteorWarning > 0) meteorWarning--;
   shieldBlockFX = shieldBlockFX.filter(fx => { fx.timer--; return fx.timer > 0; });
+  shockwaveFX = shockwaveFX.filter(fx => { fx.timer--; return fx.timer > 0; });
   if (hitFlash > 0) hitFlash *= 0.82;
+  if (healFlash > 0) healFlash *= 0.84;
 }, 1000 / 60);
 
 // ── 3D Projection ──────────────────────────────────────────────
@@ -503,6 +515,41 @@ function drawShieldBlockFX() {
     ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.stroke();
     ctx.shadowBlur = 0; ctx.restore();
   });
+}
+
+// ── Shockwave ring FX ─────────────────────────────────────────
+function drawShockwaveFX() {
+  shockwaveFX.forEach(fx => {
+    const t = fx.timer / fx.maxTimer;        // 1→0 as it fades
+    const prog = 1 - t;                      // 0→1 as ring expands
+    const worldR = fx.maxR * prog;
+    // Project the ring: sample 6 points around the circle to get screen radius
+    const cp = project(fx.x, fx.y, 0);
+    if (!cp) return;
+    const edge = project(fx.x + worldR, fx.y, 0);
+    const screenR = edge ? Math.abs(edge.sx - cp.sx) : worldR * cp.scale;
+    ctx.save();
+    ctx.globalAlpha = t * 0.85;
+    // Outer glow ring
+    ctx.beginPath(); ctx.arc(cp.sx, cp.sy, screenR, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(180,120,255,0.9)'; ctx.lineWidth = Math.max(2, 6 * t);
+    ctx.shadowColor = 'rgba(160,80,255,0.9)'; ctx.shadowBlur = 18 * t;
+    ctx.stroke();
+    // Inner fill pulse
+    ctx.beginPath(); ctx.arc(cp.sx, cp.sy, screenR * 0.55, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(220,180,255,0.5)'; ctx.lineWidth = Math.max(1, 3 * t);
+    ctx.shadowBlur = 8 * t; ctx.stroke();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1; ctx.restore();
+  });
+}
+
+// ── Hit & heal screen flashes ──────────────────────────────────
+function drawHealFlash() {
+  if (healFlash < 0.01) return;
+  const eg = ctx.createRadialGradient(CW/2, CH/2, CH * 0.15, CW/2, CH/2, CH * 0.85);
+  eg.addColorStop(0, 'rgba(0,255,100,0)');
+  eg.addColorStop(1, `rgba(0,255,100,${healFlash * 0.45})`);
+  ctx.fillStyle = eg; ctx.fillRect(0, 0, CW, CH);
 }
 
 // ── Players ────────────────────────────────────────────────────
@@ -972,6 +1019,12 @@ function drawHUD() {
     { label: '⎵  DASH',    ready: dashCooldown <= 0,
       pct: dashCooldown <= 0 ? 1 : 1 - dashCooldown / 180,
       color: [255, 200, 80], active: false },
+    { label: 'E  HEAL +10', ready: healCooldown <= 0,
+      pct: healCooldown <= 0 ? 1 : 1 - healCooldown / 360,
+      color: [60, 220, 100], active: false },
+    { label: 'R  SHOCKWAVE', ready: shockwaveCooldown <= 0,
+      pct: shockwaveCooldown <= 0 ? 1 : 1 - shockwaveCooldown / 720,
+      color: [180, 100, 255], active: false },
   ];
   ctx.save();
   bars.forEach((b, i) => {
@@ -1171,9 +1224,11 @@ function render() {
   });
 
   drawShieldBlockFX();
+  drawShockwaveFX();
   drawBeams3D();
   drawVignette();
   drawHitFlash();
+  drawHealFlash();
   drawKameText();
   drawHand();
   drawHUD();

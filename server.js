@@ -35,10 +35,15 @@ const SHIELD_DURATION = 120;
 const SHIELD_COOLDOWN = 480;
 const MAX_AMMO       = 6;
 const AMMO_REFILL_RATE = 150;
-const JUMP_FORCE     = 15;
-const GRAVITY        = 0.5;
-const RESPAWN_TIME   = 180; // ticks = 3 s
-const STREAK_TARGET  = 3;
+const JUMP_FORCE       = 15;
+const GRAVITY          = 0.5;
+const RESPAWN_TIME     = 180; // ticks = 3 s
+const STREAK_TARGET    = 3;
+const HEAL_AMOUNT      = 10;
+const HEAL_COOLDOWN    = 360;  // 6 s
+const SHOCKWAVE_RADIUS = 300;
+const SHOCKWAVE_FORCE  = 26;
+const SHOCKWAVE_COOLDOWN = 720; // 12 s
 
 const PLATFORMS = [
   { x: 480,  y: 390, r: 52, h: 72 },
@@ -236,6 +241,7 @@ io.on('connection', (socket) => {
       rockCooldown: 0, kameCooldown: 0, dashCooldown: 0,
       shieldActive: false, shieldTimer: 0, shieldCooldown: 0,
       ammo: MAX_AMMO, ammoTimer: 0,
+      healCooldown: 0, shockwaveCooldown: 0,
       killStreak: 0, respawnTimer: 0, lastHitBy: null
     };
     socket.emit('joined', {
@@ -338,6 +344,37 @@ io.on('connection', (socket) => {
     l.beams.push({ id: l.rockCounter++, x: p.x, y: p.y, z: p.z + 22, angle, pitch: pitch || 0, life: 30, owner: id, len: beamLen });
   });
 
+  socket.on('heal', () => {
+    if (!lobbyId) return;
+    const p = lobbies[lobbyId].players[id];
+    if (!p || !p.alive || p.healCooldown > 0) return;
+    p.hp = Math.min(MAX_HP, p.hp + HEAL_AMOUNT);
+    p.healCooldown = HEAL_COOLDOWN;
+    io.to(id).emit('healed', { hp: p.hp });
+  });
+
+  socket.on('shockwave', () => {
+    if (!lobbyId) return;
+    const l = lobbies[lobbyId];
+    const p = l.players[id];
+    if (!p || !p.alive || p.shockwaveCooldown > 0) return;
+    p.shockwaveCooldown = SHOCKWAVE_COOLDOWN;
+    // Push every other player in radius away — no damage
+    for (const pid in l.players) {
+      if (pid === id) continue;
+      const t = l.players[pid];
+      if (!t.alive) continue;
+      const dx = t.x - p.x, dy = t.y - p.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < SHOCKWAVE_RADIUS && dist > 0) {
+        const strength = SHOCKWAVE_FORCE * (1 - dist / SHOCKWAVE_RADIUS);
+        t.vx += (dx / dist) * strength;
+        t.vy += (dy / dist) * strength;
+      }
+    }
+    io.to(`lobby_${lobbyId}`).emit('shockwave_fx', { x: p.x, y: p.y, r: SHOCKWAVE_RADIUS });
+  });
+
   socket.on('disconnect', () => {
     if (!lobbyId) return;
     delete lobbies[lobbyId].players[id];
@@ -398,6 +435,8 @@ setInterval(() => {
       if (p.dashCooldown > 0) p.dashCooldown--;
       if (p.shieldTimer > 0) { p.shieldTimer--; if (p.shieldTimer === 0) p.shieldActive = false; }
       if (p.shieldCooldown > 0 && !p.shieldActive) p.shieldCooldown--;
+      if (p.healCooldown > 0) p.healCooldown--;
+      if (p.shockwaveCooldown > 0) p.shockwaveCooldown--;
       if (p.ammo < MAX_AMMO) { p.ammoTimer++; if (p.ammoTimer >= AMMO_REFILL_RATE) { p.ammo++; p.ammoTimer = 0; } }
 
       if (Math.hypot(p.x - PORTAL_POS.x, p.y - PORTAL_POS.y) < PORTAL_POS.r + PLAYER_R) {
@@ -494,6 +533,7 @@ setInterval(() => {
         ready: p.rockCooldown === 0, kamReady: p.kameCooldown === 0,
         dashCooldown: p.dashCooldown, shieldActive: p.shieldActive,
         shieldCooldown: p.shieldCooldown, ammo: p.ammo,
+        healCooldown: p.healCooldown, shockwaveCooldown: p.shockwaveCooldown,
         killStreak: p.killStreak, respawnTimer: p.respawnTimer, onGround: p.onGround
       })),
       rocks: l.rocks.map(r => ({
