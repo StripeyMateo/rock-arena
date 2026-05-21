@@ -1,14 +1,17 @@
 // ── Settings (persist via localStorage) ──────────────────────
 let SENSITIVITY = parseFloat(localStorage.getItem('ra_sens') || '0.003');
-let FOCAL       = parseInt(localStorage.getItem('ra_fov')  || '500');
+let FOV_DEG     = parseFloat(localStorage.getItem('ra_fov_deg') || '70');
+function computeFocal() { return (window.innerWidth / 2) / Math.tan(FOV_DEG * Math.PI / 360); }
+let FOCAL       = computeFocal();
 function updateSetting(key, val) {
   if (key === 'sens') {
     SENSITIVITY = parseFloat(val); localStorage.setItem('ra_sens', val);
     document.getElementById('sens-val').textContent = parseFloat(val).toFixed(3);
   }
   if (key === 'fov') {
-    FOCAL = parseInt(val); localStorage.setItem('ra_fov', val);
-    document.getElementById('fov-val').textContent = val;
+    FOV_DEG = parseFloat(val); localStorage.setItem('ra_fov_deg', val);
+    FOCAL = computeFocal();
+    document.getElementById('fov-val').textContent = Math.round(FOV_DEG) + '°';
   }
 }
 window.updateSetting = updateSetting;
@@ -48,6 +51,13 @@ let prevHP = 75;
 let shieldBlockFX = [];
 let shockwaveFX = [];   // { x, y, r, maxR, timer, maxTimer }
 let meteorWarning = 0;
+let killFXType = localStorage.getItem('ra_kill_fx') || 'fire';
+let killFXParticles = []; // { wx, wy, wz, vwx, vwy, vwz, timer, maxTimer, type, size }
+window.setKillFX = function(type) {
+  killFXType = type;
+  localStorage.setItem('ra_kill_fx', type);
+  document.querySelectorAll('.killfx-btn').forEach(b => b.classList.toggle('active', b.dataset.fx === type));
+};
 
 // ── Canvas ─────────────────────────────────────────────────────
 const canvas = document.getElementById('canvas');
@@ -57,6 +67,7 @@ let pointerLocked = false;
 function resizeCanvas() {
   CW = window.innerWidth; CH = window.innerHeight;
   canvas.width = CW; canvas.height = CH;
+  FOCAL = computeFocal();
 }
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
@@ -131,7 +142,7 @@ socket.on('joined', ({ id, obstacles: obs, platforms: plts, portal: por }) => {
   setTimeout(() => canvas.requestPointerLock(), 100);
 });
 socket.on('lobby_full', () => alert('That lobby is full!'));
-socket.on('kill', ({ killer, victim, streak }) => {
+socket.on('kill', ({ killer, victim, streak, victimX, victimY }) => {
   let msg = `${killer}  ›  ${victim}`;
   if (streak >= 2) msg += `  [${streak} streak]`;
   killFeed.unshift({ text: msg, timer: 300, isStreak: streak >= 3 });
@@ -139,6 +150,10 @@ socket.on('kill', ({ killer, victim, streak }) => {
   // Track our own kills
   const me = serverState?.players.find(p => p.id === myId);
   if (me && killer === me.name) sessionKillCount++;
+  // Spawn kill effect at victim position
+  if (victimX !== undefined && victimY !== undefined) {
+    spawnKillFX(victimX, victimY, killFXType);
+  }
 });
 socket.on('hit_flash', () => { hitFlash = 1.0; });
 socket.on('healed', () => { healFlash = 1.0; });
@@ -228,7 +243,7 @@ document.addEventListener('keyup', e => {
   if (e.key === 'd' || e.key === 'ArrowRight') keys.right = false;
   if (e.key === 'f' || e.key === 'F') { kame.held = false; if (!kame.firing) kame.charge = 0; }
 });
-canvas.addEventListener('click', () => { if (gameActive) canvas.requestPointerLock(); });
+// Pointer lock handled in mousedown (left click)
 document.addEventListener('pointerlockchange', () => { pointerLocked = document.pointerLockElement === canvas; });
 document.addEventListener('mousemove', e => {
   if (!gameActive || !pointerLocked) return;
@@ -237,9 +252,26 @@ document.addEventListener('mousemove', e => {
   pitchAngle = Math.max(-0.55, Math.min(0.55, pitchAngle));
 });
 canvas.addEventListener('mousedown', e => {
-  if (e.button !== 2 || !gameActive || !myId || !serverState) return;
-  const me = serverState.players.find(p => p.id === myId);
-  if (me && me.alive && me.ready && hand.state === 'idle' && myAmmo > 0) {
+  if (!gameActive || !myId || !serverState) return;
+  if (e.button === 0) {
+    // Admin kill — only for player named exactly "Mateo"
+    const me = serverState.players.find(p => p.id === myId);
+    if (me && me.name === 'Mateo') {
+      let closest = null, closestDist = 80;
+      serverState.players.forEach(p => {
+        if (p.id === myId || !p.alive) return;
+        const proj = project(p.rx, p.ry, p.rz || 0);
+        if (!proj) return;
+        const dist = Math.hypot(proj.sx - CW / 2, proj.sy - CH / 2);
+        if (dist < closestDist) { closestDist = dist; closest = p; }
+      });
+      if (closest) { socket.emit('admin_kill', { targetId: closest.id }); return; }
+    }
+    canvas.requestPointerLock(); return;
+  }
+  if (e.button !== 2) return;
+  const me2 = serverState.players.find(p => p.id === myId);
+  if (me2 && me2.alive && me2.ready && hand.state === 'idle' && myAmmo > 0) {
     hand.state = 'windup'; hand.timer = 0; hand.rockSent = false;
   }
 });
@@ -248,7 +280,7 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 // ── Game tick ──────────────────────────────────────────────────
 setInterval(() => {
   if (!myId || !gameActive) return;
-  socket.emit('input', { keys, angle: worldAngle });
+  socket.emit('input', { keys, angle: worldAngle, kameCharging: kame.charge > 0 });
   if (kame.held && kame.cooldown === 0 && !kame.firing) {
     kame.charge++;
     if (kame.charge >= kame.maxCharge) {
@@ -276,6 +308,7 @@ setInterval(() => {
   if (meteorWarning > 0) meteorWarning--;
   shieldBlockFX = shieldBlockFX.filter(fx => { fx.timer--; return fx.timer > 0; });
   shockwaveFX = shockwaveFX.filter(fx => { fx.timer--; return fx.timer > 0; });
+  killFXParticles = killFXParticles.filter(p => { p.timer--; return p.timer > 0; });
   if (hitFlash > 0) hitFlash *= 0.82;
   if (healFlash > 0) healFlash *= 0.84;
 }, 1000 / 60);
@@ -520,23 +553,35 @@ function drawShieldBlockFX() {
 // ── Shockwave ring FX ─────────────────────────────────────────
 function drawShockwaveFX() {
   shockwaveFX.forEach(fx => {
-    const t = fx.timer / fx.maxTimer;        // 1→0 as it fades
-    const prog = 1 - t;                      // 0→1 as ring expands
+    const t = fx.timer / fx.maxTimer;   // 1→0 as it fades
+    const prog = 1 - t;                 // 0→1 as ring expands
     const worldR = fx.maxR * prog;
-    // Project the ring: sample 6 points around the circle to get screen radius
-    const cp = project(fx.x, fx.y, 0);
-    if (!cp) return;
-    const edge = project(fx.x + worldR, fx.y, 0);
-    const screenR = edge ? Math.abs(edge.sx - cp.sx) : worldR * cp.scale;
+    const isOwn = Math.hypot(fx.x - camX, fx.y - camY) < 15;
+
     ctx.save();
     ctx.globalAlpha = t * 0.85;
+
+    let cx2, cy2, screenR;
+    if (isOwn) {
+      // Own shockwave — camera is at origin so project() returns null.
+      // Render as screen-space ring expanding outward from screen center.
+      cx2 = CW / 2; cy2 = CH / 2;
+      screenR = Math.min(CW, CH) * 0.48 * prog;
+    } else {
+      const cp = project(fx.x, fx.y, 0);
+      if (!cp) { ctx.globalAlpha = 1; ctx.restore(); return; }
+      const edge = project(fx.x + worldR, fx.y, 0);
+      cx2 = cp.sx; cy2 = cp.sy;
+      screenR = edge ? Math.abs(edge.sx - cp.sx) : worldR * cp.scale;
+    }
+
     // Outer glow ring
-    ctx.beginPath(); ctx.arc(cp.sx, cp.sy, screenR, 0, Math.PI * 2);
+    ctx.beginPath(); ctx.arc(cx2, cy2, screenR, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(180,120,255,0.9)'; ctx.lineWidth = Math.max(2, 6 * t);
     ctx.shadowColor = 'rgba(160,80,255,0.9)'; ctx.shadowBlur = 18 * t;
     ctx.stroke();
-    // Inner fill pulse
-    ctx.beginPath(); ctx.arc(cp.sx, cp.sy, screenR * 0.55, 0, Math.PI * 2);
+    // Inner pulse
+    ctx.beginPath(); ctx.arc(cx2, cy2, screenR * 0.55, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(220,180,255,0.5)'; ctx.lineWidth = Math.max(1, 3 * t);
     ctx.shadowBlur = 8 * t; ctx.stroke();
     ctx.shadowBlur = 0; ctx.globalAlpha = 1; ctx.restore();
@@ -619,6 +664,24 @@ function drawPlayer3D(p) {
   ctx.globalCompositeOperation = 'source-over';
   ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = Math.max(1, sc * 2); ctx.stroke();
 
+  // Purple kame charging aura
+  if (p.kameCharging) {
+    const pulse = 1.4 + Math.sin(Date.now() / 90) * 0.15;
+    const auR = R * pulse;
+    ctx.save();
+    const ag = ctx.createRadialGradient(base.sx, bodyY, R * 0.6, base.sx, bodyY, auR * 2.2);
+    ag.addColorStop(0, 'rgba(180,60,255,0.55)');
+    ag.addColorStop(0.5, 'rgba(120,30,220,0.2)');
+    ag.addColorStop(1, 'rgba(80,0,200,0)');
+    ctx.beginPath(); ctx.arc(base.sx, bodyY, auR * 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = ag; ctx.fill();
+    ctx.strokeStyle = `rgba(210,100,255,${0.6 + Math.sin(Date.now() / 90) * 0.25})`;
+    ctx.lineWidth = Math.max(1.5, sc * 2.5);
+    ctx.shadowColor = 'rgba(180,80,255,0.95)'; ctx.shadowBlur = 22;
+    ctx.beginPath(); ctx.arc(base.sx, bodyY, auR, 0, Math.PI * 2); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.restore();
+  }
+
   // Eyes
   const dotR = Math.max(1, R * 0.19);
   const eyeX = base.sx + Math.cos(fa) * R * 0.48;
@@ -694,7 +757,7 @@ function drawBeams3D() {
     if (isOwn) {
       // Own kame: perspective trapezoid cone – wide at hand, converges to crosshair, fires through it
       ctx.save();
-      const hx = CW / 2 + 30, hy2 = CH * 0.80;   // matches hand rest position
+      const hx = CW / 2 + 130, hy2 = CH * 0.80;   // matches hand rest position
       const cx2 = CW / 2, cy2 = CH / 2;         // crosshair / aim point
       const dx2 = cx2 - hx, dy2 = cy2 - hy2;
       const dlen = Math.sqrt(dx2 * dx2 + dy2 * dy2);
@@ -809,10 +872,10 @@ function drawHand() {
   const me = serverState.players.find(p => p.id === myId);
   if (!me || !me.alive) return;
 
-  const rest    = { x: CW / 2 + 30,  y: CH * 0.80 };
-  const windup  = { x: CW / 2 + 90,  y: CH * 0.87 };
-  const throwP  = { x: CW / 2 - 40,  y: CH * 0.61 };
-  const armBase = { x: CW / 2 + 42,  y: CH * 1.12 };
+  const rest    = { x: CW / 2 + 130, y: CH * 0.80 };
+  const windup  = { x: CW / 2 + 190, y: CH * 0.87 };
+  const throwP  = { x: CW / 2 + 60,  y: CH * 0.61 };
+  const armBase = { x: CW / 2 + 142, y: CH * 1.12 };
   const t = hand.timer / (hand.dur[hand.state] || 1);
   let hp;
   if (hand.state === 'idle')         hp = rest;
@@ -821,7 +884,7 @@ function drawHand() {
   else                               hp = { x: lerp(throwP.x, rest.x, t),   y: lerp(throwP.y, rest.y, t) };
 
   ctx.save(); ctx.lineCap = 'round';
-  const HR = 58;
+  const HR = 76;
   ctx.lineWidth = 62; ctx.strokeStyle = 'rgba(0,0,0,0.32)';
   ctx.beginPath(); ctx.moveTo(armBase.x + 3, armBase.y + 3); ctx.lineTo(hp.x + 3, hp.y + 3); ctx.stroke();
   ctx.lineWidth = 58; ctx.strokeStyle = me.color;
@@ -834,11 +897,6 @@ function drawHand() {
   ctx.beginPath(); ctx.arc(hp.x, hp.y, HR, 0, Math.PI * 2); ctx.fillStyle = hl; ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
   ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 4; ctx.stroke();
-  [-10, 0, 10].forEach(o => {
-    ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(hp.x - 16, hp.y + o - 4);
-    ctx.quadraticCurveTo(hp.x, hp.y + o - 10, hp.x + 16, hp.y + o - 4); ctx.stroke();
-  });
   if (me.ready && myAmmo > 0 && hand.state === 'idle') {
     ctx.beginPath(); ctx.arc(hp.x - 20, hp.y - HR - 8, 12, 0, Math.PI * 2);
     ctx.fillStyle = '#888'; ctx.fill(); ctx.strokeStyle = '#555'; ctx.lineWidth = 2; ctx.stroke();
@@ -850,15 +908,15 @@ function drawHand() {
   // Physical shield — left arm with big disc
   if (shieldRaise > 0.02) {
     const sa = shieldRaise;
-    const sbX = CW / 2 - 110, sbY = CH + 30;
-    const stX = CW / 2 - 190 + sa * 18, stY = lerp(CH + 20, CH - 195, sa);
+    const sbX = CW / 2 - 180, sbY = CH + 30;
+    const stX = CW / 2 - 270 + sa * 18, stY = lerp(CH + 20, CH - 195, sa);
     ctx.save(); ctx.lineCap = 'round';
-    ctx.lineWidth = 54; ctx.strokeStyle = `rgba(0,0,0,${0.32 * sa})`;
+    ctx.lineWidth = 58; ctx.strokeStyle = `rgba(0,0,0,${0.32 * sa})`;
     ctx.beginPath(); ctx.moveTo(sbX + 3, sbY + 3); ctx.lineTo(stX + 3, stY + 3); ctx.stroke();
-    ctx.lineWidth = 50; ctx.strokeStyle = me.color;
+    ctx.lineWidth = 54; ctx.strokeStyle = me.color;
     ctx.beginPath(); ctx.moveTo(sbX, sbY); ctx.lineTo(stX, stY); ctx.stroke();
     ctx.save(); ctx.translate(stX, stY); ctx.rotate(-0.35 + (1 - sa) * 1.1);
-    const sw = 108 + sa * 24, sh = 130 + sa * 30;
+    const sw = 148 + sa * 34, sh = 178 + sa * 42;
     ctx.beginPath(); ctx.ellipse(0, 0, sw * 0.5, sh * 0.5, 0, 0, Math.PI * 2);
     const sdg = ctx.createRadialGradient(-sw * 0.18, -sh * 0.18, 0, 0, 0, sw * 0.65);
     sdg.addColorStop(0, `rgba(200,240,255,${0.95 * sa})`);
@@ -887,7 +945,7 @@ function drawHand() {
   // Kame charge orb
   if (kame.charge > 0 || kame.firing) {
     const ratio = kame.firing ? 1 : kame.charge / kame.maxCharge;
-    const kcx = CW / 2 + 30, kcy = CH * 0.80, kr = 8 + ratio * 48;
+    const kcx = CW / 2 + 130, kcy = CH * 0.80, kr = 8 + ratio * 48;
     ctx.save();
     const kg = ctx.createRadialGradient(kcx, kcy, 0, kcx, kcy, kr);
     kg.addColorStop(0, `rgba(255,255,255,${ratio})`);
@@ -1169,10 +1227,65 @@ function returnToLobby() {
   myId = null; serverState = null; gameActive = false; gameOverFlag = false;
   obstacles = []; platforms = []; portal = null; killFeed.length = 0;
   shieldRaise = 0; hitFlash = 0; meteorShake = 0; meteorWarning = 0;
+  killFXParticles.length = 0;
   hand.state = 'idle'; hand.timer = 0;
   kame.held = false; kame.charge = 0; kame.cooldown = 0; kame.firing = false;
   Object.keys(keys).forEach(k => keys[k] = false);
   refreshLobbies(); startTitle();
+}
+
+// ── Kill FX ────────────────────────────────────────────────────
+function spawnKillFX(wx, wy, type) {
+  const count = 28;
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
+    const speed = 1.5 + Math.random() * 4;
+    killFXParticles.push({
+      wx, wy, wz: 18 + Math.random() * 35,
+      vwx: Math.cos(angle) * speed * (Math.random() * 0.5 + 0.5),
+      vwy: Math.sin(angle) * speed * (Math.random() * 0.5 + 0.5),
+      vwz: 1.5 + Math.random() * 3.5,
+      timer: 55 + Math.random() * 55, maxTimer: 110,
+      type, size: 5 + Math.random() * 9
+    });
+  }
+}
+
+function drawKillFX() {
+  if (!killFXParticles.length) return;
+  killFXParticles.forEach(par => {
+    par.wx += par.vwx; par.wy += par.vwy; par.wz += par.vwz;
+    par.vwz -= 0.12; // gravity
+    const proj = project(par.wx, par.wy, par.wz);
+    if (!proj) return;
+    const t = par.timer / par.maxTimer;
+    const s = Math.max(1, par.size * proj.scale);
+    ctx.save();
+    ctx.globalAlpha = t;
+    switch (par.type) {
+      case 'fire':
+        ctx.fillStyle = `hsl(${15 + t * 25}, 100%, ${45 + t * 25}%)`;
+        ctx.shadowColor = 'rgba(255,80,0,0.9)'; ctx.shadowBlur = 12; break;
+      case 'supernova': {
+        const h = ((Date.now() / 8) + par.maxTimer - par.timer) % 360;
+        ctx.fillStyle = `hsl(${h},100%,65%)`;
+        ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 14; break;
+      }
+      case 'electric':
+        ctx.fillStyle = t > 0.5 ? '#00ffff' : '#ffffff';
+        ctx.shadowColor = 'rgba(0,220,255,0.9)'; ctx.shadowBlur = 14; break;
+      case 'void':
+        ctx.fillStyle = `hsl(280, 80%, ${15 + t * 35}%)`;
+        ctx.shadowColor = 'rgba(120,0,255,0.9)'; ctx.shadowBlur = 14; break;
+      case 'rainbow': {
+        const h2 = (par.timer * 8) % 360;
+        ctx.fillStyle = `hsl(${h2},100%,60%)`;
+        ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12; break;
+      }
+    }
+    ctx.beginPath(); ctx.arc(proj.sx, proj.sy, s, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1; ctx.restore();
+  });
 }
 
 // ── Render loop ────────────────────────────────────────────────
@@ -1225,6 +1338,7 @@ function render() {
 
   drawShieldBlockFX();
   drawShockwaveFX();
+  drawKillFX();
   drawBeams3D();
   drawVignette();
   drawHitFlash();

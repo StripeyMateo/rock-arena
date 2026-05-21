@@ -41,8 +41,8 @@ const RESPAWN_TIME     = 180; // ticks = 3 s
 const STREAK_TARGET    = 3;
 const HEAL_AMOUNT      = 10;
 const HEAL_COOLDOWN    = 360;  // 6 s
-const SHOCKWAVE_RADIUS = 300;
-const SHOCKWAVE_FORCE  = 26;
+const SHOCKWAVE_RADIUS = 380;
+const SHOCKWAVE_FORCE  = 35;
 const SHOCKWAVE_COOLDOWN = 720; // 12 s
 
 const PLATFORMS = [
@@ -172,7 +172,8 @@ function handleKill(l, lid, killerId, victim) {
   killer.killStreak++;
   sessionKills[killer.name] = (sessionKills[killer.name] || 0) + 1;
   io.to(`lobby_${lid}`).emit('kill', {
-    killer: killer.name, victim: victim.name, streak: killer.killStreak
+    killer: killer.name, victim: victim.name, streak: killer.killStreak,
+    victimX: victim.x, victimY: victim.y
   });
   if (killer.killStreak >= STREAK_TARGET) {
     killer.killStreak = 0;
@@ -251,11 +252,12 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('input', ({ keys, angle }) => {
+  socket.on('input', ({ keys, angle, kameCharging }) => {
     if (!lobbyId) return;
     const p = lobbies[lobbyId].players[id];
     if (!p || !p.alive) return;
     p.keys = keys; p.angle = angle;
+    p.kameCharging = !!kameCharging;
   });
 
   socket.on('jump', () => {
@@ -328,10 +330,15 @@ io.on('connection', (socket) => {
     inBeam.sort((a, b) => a.d - b.d);
     for (const { pid, t } of inBeam) {
       if (t.shieldActive) {
-        // Shield blocks beam — stop here, no one behind gets hit
-        t.shieldActive = false; t.shieldTimer = 0;
-        io.to(`lobby_${lobbyId}`).emit('shield_block', { x: t.x, y: t.y });
-        break;
+        // Front-only check: dot(player_forward, beam_direction) < 0 means facing each other
+        const kDot = Math.cos(t.angle) * Math.cos(angle) + Math.sin(t.angle) * Math.sin(angle);
+        if (kDot < 0) {
+          // Shield absorbs kame from front — no damage, shield breaks, beam continues
+          t.shieldActive = false; t.shieldTimer = 0;
+          io.to(`lobby_${lobbyId}`).emit('shield_block', { x: t.x, y: t.y });
+          continue; // beam passes through, everyone behind still gets hit
+        }
+        // Hit from behind — shield doesn't protect, fall through to damage
       }
       t.hp -= KAME_DAMAGE; t.lastHitBy = id;
       io.to(pid).emit('hit_flash');
@@ -373,6 +380,18 @@ io.on('connection', (socket) => {
       }
     }
     io.to(`lobby_${lobbyId}`).emit('shockwave_fx', { x: p.x, y: p.y, r: SHOCKWAVE_RADIUS });
+  });
+
+  socket.on('admin_kill', ({ targetId }) => {
+    if (!lobbyId) return;
+    const l = lobbies[lobbyId];
+    const p = l.players[id];
+    if (!p || !p.alive || p.name !== 'Mateo') return;
+    const target = l.players[targetId];
+    if (!target || !target.alive) return;
+    target.hp = 0; target.alive = false; target.respawnTimer = RESPAWN_TIME;
+    target.lastHitBy = id;
+    handleKill(l, lobbyId, id, target);
   });
 
   socket.on('disconnect', () => {
@@ -456,7 +475,7 @@ setInterval(() => {
         if (r.life <= 0) return false;
         if (r.z <= 0) {
           const SPLASH = 170;
-          const METEOR_DMG = 5;
+          const METEOR_DMG = 10;
           const HIT_CHANCE = 0.60;
           for (const pid in l.players) {
             // Owner is always immune — check both pid and p.id for safety
@@ -506,10 +525,14 @@ setInterval(() => {
         if (p.z > 50) continue; // elevated players safe from ground rocks
         if (Math.hypot(r.x - p.x, r.y - p.y) < PLAYER_R + ROCK_R) {
           if (p.shieldActive) {
-            p.shieldActive = false; p.shieldTimer = 0;
-            r.vx *= -1.1; r.vy *= -1.1; r.owner = pid; r.bounces++;
-            io.to(`lobby_${lid}`).emit('shield_block', { x: p.x, y: p.y });
-            return true;
+            // Front-only: rock velocity dot player forward < 0 means rock comes from in front
+            const dot = r.vx * Math.cos(p.angle) + r.vy * Math.sin(p.angle);
+            if (dot < 0) {
+              p.shieldActive = false; p.shieldTimer = 0;
+              io.to(`lobby_${lid}`).emit('shield_block', { x: p.x, y: p.y });
+              return false; // rock absorbed
+            }
+            // Rock from behind — no protection, fall through
           }
           p.hp -= HIT_DAMAGE; p.lastHitBy = r.owner;
           io.to(pid).emit('hit_flash');
@@ -534,7 +557,8 @@ setInterval(() => {
         dashCooldown: p.dashCooldown, shieldActive: p.shieldActive,
         shieldCooldown: p.shieldCooldown, ammo: p.ammo,
         healCooldown: p.healCooldown, shockwaveCooldown: p.shockwaveCooldown,
-        killStreak: p.killStreak, respawnTimer: p.respawnTimer, onGround: p.onGround
+        killStreak: p.killStreak, respawnTimer: p.respawnTimer, onGround: p.onGround,
+        kameCharging: p.kameCharging || false
       })),
       rocks: l.rocks.map(r => ({
         id: r.id, x: r.x, y: r.y,

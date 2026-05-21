@@ -108,6 +108,7 @@
   <div class="tab-bar">
     <button class="tab-btn active" onclick="showTab('play')">Play</button>
     <button class="tab-btn" onclick="showTab('rules')">How To Play</button>
+    <button class="tab-btn" onclick="showTab('killfx')">Kill FX</button>
     <button class="tab-btn" onclick="showTab('settings')">Settings</button>
   </div>
 
@@ -164,6 +165,15 @@
     </div>
   </div>
 
+  <!-- KILL FX TAB -->
+  <div id="tab-killfx" style="display:none; text-align:left">
+    <div class="rules-section">
+      <h3>Kill Effect</h3>
+      <p style="color:#888;font-size:0.78rem;margin-bottom:1rem">Choose the effect that plays when you eliminate a player.</p>
+      <div id="killfx-list" style="display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+  </div>
+
   <!-- SETTINGS TAB -->
   <div id="tab-settings" style="display:none">
     <div class="rules-section">
@@ -177,10 +187,10 @@
       </div>
       <div class="setting-row">
         <span>Field of View</span>
-        <input type="range" min="300" max="700" step="20"
-          value="500" oninput="updateSetting('fov',this.value)"
+        <input type="range" min="50" max="110" step="5"
+          value="70" oninput="updateSetting('fov',this.value)"
           style="flex:1;margin:0 10px;accent-color:orange" />
-        <span id="fov-val" style="min-width:36px;color:orange;text-align:right">500</span>
+        <span id="fov-val" style="min-width:40px;color:orange;text-align:right">70°</span>
       </div>
     </div>
     <div class="rules-section">
@@ -203,21 +213,55 @@
 </div>
 
 <script>
+  const KILL_FX_OPTIONS = [
+    { id: 'fire',     label: '🔥 Fire Burst',    desc: 'Eruption of fire and embers' },
+    { id: 'supernova',label: '✨ Supernova',      desc: 'Rainbow-colored shockwave explosion' },
+    { id: 'electric', label: '⚡ Electric',       desc: 'Crackling cyan lightning sparks' },
+    { id: 'void',     label: '🌀 Void Collapse',  desc: 'Dark purple imploding energy' },
+    { id: 'rainbow',  label: '🌈 Rainbow Blast',  desc: 'Colorful confetti explosion' },
+  ];
+
+  function initKillFXTab() {
+    const list = document.getElementById('killfx-list');
+    if (list.children.length) return; // already built
+    const current = localStorage.getItem('ra_kill_fx') || 'fire';
+    KILL_FX_OPTIONS.forEach(fx => {
+      const btn = document.createElement('button');
+      btn.className = 'killfx-btn lobby-btn';
+      btn.dataset.fx = fx.id;
+      btn.style.cssText = 'text-align:left;min-width:unset;padding:10px 16px;display:flex;align-items:center;gap:12px';
+      btn.innerHTML = `<span style="font-size:1.1rem;min-width:100px">${fx.label}</span><span style="font-size:0.75rem;color:#888">${fx.desc}</span>`;
+      if (fx.id === current) btn.classList.add('active');
+      btn.style.borderColor = fx.id === current ? 'orange' : 'rgba(255,165,0,0.3)';
+      btn.addEventListener('click', () => {
+        localStorage.setItem('ra_kill_fx', fx.id);
+        if (window.setKillFX) window.setKillFX(fx.id);
+        document.querySelectorAll('.killfx-btn').forEach(b => {
+          const isThis = b.dataset.fx === fx.id;
+          b.classList.toggle('active', isThis);
+          b.style.borderColor = isThis ? 'orange' : 'rgba(255,165,0,0.3)';
+        });
+      });
+      list.appendChild(btn);
+    });
+  }
+
   function showTab(name) {
-    ['play','rules','settings'].forEach(t => {
+    ['play','rules','killfx','settings'].forEach(t => {
       document.getElementById('tab-' + t).style.display = t === name ? 'block' : 'none';
     });
     document.querySelectorAll('.tab-btn').forEach((b, i) => {
-      b.classList.toggle('active', ['play','rules','settings'][i] === name);
+      b.classList.toggle('active', ['play','rules','killfx','settings'][i] === name);
     });
     if (name === 'settings') loadLeaderboard();
+    if (name === 'killfx') initKillFXTab();
     // Sync slider displays from localStorage
     const s = localStorage.getItem('ra_sens') || '0.003';
-    const f = localStorage.getItem('ra_fov')  || '500';
+    const f = localStorage.getItem('ra_fov_deg') || '70';
     document.querySelector('[oninput*="sens"]').value = s;
     document.getElementById('sens-val').textContent = parseFloat(s).toFixed(3);
     document.querySelector('[oninput*="fov"]').value = f;
-    document.getElementById('fov-val').textContent = f;
+    document.getElementById('fov-val').textContent = Math.round(parseFloat(f)) + '°';
   }
   function loadLeaderboard() {
     fetch('/api/leaderboard').then(r => r.json()).then(data => {
