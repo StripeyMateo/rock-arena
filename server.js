@@ -34,7 +34,7 @@ const MAX_BOUNCES    = 4;
 const SHIELD_DURATION = 120;
 const SHIELD_COOLDOWN = 480;
 const MAX_AMMO       = 6;
-const AMMO_REFILL_RATE = 150;
+const AMMO_REFILL_RATE = 80;
 const JUMP_FORCE       = 15;
 const GRAVITY          = 0.5;
 const RESPAWN_TIME     = 180; // ticks = 3 s
@@ -192,19 +192,38 @@ function triggerMeteorShower(l, lid, ownerId) {
   const enemyPositions = Object.values(l.players)
     .filter(p => p.alive && p.id !== ownerId)
     .map(p => ({ x: p.x, y: p.y }));
-  for (let i = 0; i < 22; i++) {
+
+  // Build a grid of positions covering the whole map (6×5 = 30 cells)
+  const COLS = 6, ROWS = 5;
+  const cellW = MAP_W / COLS, cellH = MAP_H / ROWS;
+  const gridPositions = [];
+  for (let row = 0; row < ROWS; row++)
+    for (let col = 0; col < COLS; col++)
+      gridPositions.push({
+        x: col * cellW + Math.random() * cellW,
+        y: row * cellH + Math.random() * cellH
+      });
+  // Shuffle grid so meteors don't fall in order
+  for (let i = gridPositions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [gridPositions[i], gridPositions[j]] = [gridPositions[j], gridPositions[i]];
+  }
+
+  const TOTAL = 36;
+  for (let i = 0; i < TOTAL; i++) {
     setTimeout(() => {
       if (!lobbies[lid]) return;
       const ll = lobbies[lid];
-      // Every other meteor targets a living enemy (with spread), rest random
       let mx, my;
-      if (i % 2 === 0 && enemyPositions.length > 0) {
+      if (i < 6 && enemyPositions.length > 0) {
+        // First 6 target living enemies with tight spread
         const target = enemyPositions[i % enemyPositions.length];
-        mx = target.x + (Math.random() - 0.5) * 180;
-        my = target.y + (Math.random() - 0.5) * 180;
+        mx = target.x + (Math.random() - 0.5) * 120;
+        my = target.y + (Math.random() - 0.5) * 120;
       } else {
-        mx = 60 + Math.random() * (MAP_W - 120);
-        my = 60 + Math.random() * (MAP_H - 120);
+        // Rest spread across the whole map via shuffled grid
+        const gp = gridPositions[i % gridPositions.length];
+        mx = gp.x; my = gp.y;
       }
       ll.rocks.push({
         id: ll.rockCounter++,
@@ -216,7 +235,7 @@ function triggerMeteorShower(l, lid, ownerId) {
         vz: -16 - Math.random() * 6,
         owner: ownerId, life: 280, bounces: 0, isMeteor: true
       });
-    }, i * 180);
+    }, i * 160);
   }
 }
 
@@ -371,7 +390,7 @@ io.on('connection', (socket) => {
     const p = l.players[id];
     if (!p || !p.alive || p.shockwaveCooldown > 0) return;
     p.shockwaveCooldown = SHOCKWAVE_COOLDOWN;
-    // Push every other player in radius away — no damage
+    // Push players in radius and deal 5 damage
     for (const pid in l.players) {
       if (pid === id) continue;
       const t = l.players[pid];
@@ -382,6 +401,12 @@ io.on('connection', (socket) => {
         const strength = SHOCKWAVE_FORCE * (1 - dist / SHOCKWAVE_RADIUS);
         t.vx += (dx / dist) * strength;
         t.vy += (dy / dist) * strength;
+        t.hp -= 5; t.lastHitBy = id;
+        io.to(pid).emit('hit_flash');
+        if (t.hp <= 0) {
+          t.hp = 0; t.alive = false; t.respawnTimer = RESPAWN_TIME;
+          handleKill(l, lobbyId, id, t);
+        }
       }
     }
     io.to(`lobby_${lobbyId}`).emit('shockwave_fx', { x: p.x, y: p.y, r: SHOCKWAVE_RADIUS });
