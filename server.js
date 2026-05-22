@@ -47,10 +47,19 @@ const SHOCKWAVE_COOLDOWN = 720; // 12 s
 
 // ── Redeem codes ────────────────────────────────────────────────
 const REDEEM_CODES = {
+  // Public codes (shown in release notes)
   'ROCKSTAR':    { type: 'coins', coins: 500 },
   'ARENA2025':   { type: 'coins', coins: 200 },
-  'NEWPLAYER':   { type: 'coins', coins: 100 },
-  'SUPERSECRET': { type: 'ability', ability: 'admin_kill' }, // secret
+  'NEWPLAYER':   { type: 'coins', coins: 150 },
+  'HATKING':     { type: 'coins', coins: 400 },
+  'BALLBUSTER':  { type: 'coins', coins: 300 },
+  'COINFALL':    { type: 'coins', coins: 250 },
+  'STONECOLD':   { type: 'coins', coins: 350 },
+  'ROCKOUT':     { type: 'coins', coins: 450 },
+  'ARENASTAR':   { type: 'coins', coins: 300 },
+  'HATLIFE':     { type: 'coins', coins: 275 },
+  // Secret code — not shown publicly
+  'SUPERSECRET': { type: 'ability', ability: 'admin_kill' },
 };
 const usedCodesBySocket = {}; // socketId → Set of redeemed keys
 
