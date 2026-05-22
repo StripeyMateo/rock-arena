@@ -45,6 +45,25 @@ const SHOCKWAVE_RADIUS = 420;
 const SHOCKWAVE_FORCE  = 68;
 const SHOCKWAVE_COOLDOWN = 720; // 12 s
 
+// ── Redeem codes ────────────────────────────────────────────────
+const REDEEM_CODES = {
+  'ROCKSTAR':    { type: 'coins', coins: 500 },
+  'ARENA2025':   { type: 'coins', coins: 200 },
+  'NEWPLAYER':   { type: 'coins', coins: 100 },
+  'SUPERSECRET': { type: 'ability', ability: 'admin_kill' }, // secret
+};
+const usedCodesBySocket = {}; // socketId → Set of redeemed keys
+
+// ── Private lobbies ─────────────────────────────────────────────
+const privateLobbies = {};
+function generateLobbyCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+function getLobby(lid) { return lobbies[lid] || privateLobbies[lid] || null; }
+
 const PLATFORMS = [
   { x: 480,  y: 390, r: 52, h: 72 },
   { x: 1120, y: 390, r: 52, h: 72 },
@@ -241,21 +260,41 @@ function triggerMeteorShower(l, lid, ownerId) {
 
 io.on('connection', (socket) => {
   let lobbyId = null;
+  let hasAdminKill = false; // set per session when code is redeemed
   const id = socket.id;
 
-  socket.on('join', ({ lobby, name, color }) => {
-    const l = lobbies[lobby];
-    if (!l) return;
-    if (playerCount(lobby) >= MAX_PLAYERS) { socket.emit('lobby_full'); return; }
-    // Leave previous lobby room so we don't receive state from both lobbies
+  socket.on('join', ({ lobby, name, color, hat, isPrivate }) => {
+    const cleanName = (name || '').trim().slice(0, 16);
+    if (!cleanName) { socket.emit('join_error', { msg: 'Please enter a name to play!' }); return; }
+
+    let l, lid;
+    if (isPrivate) {
+      lid = String(lobby).toUpperCase();
+      l = privateLobbies[lid];
+      if (!l) { socket.emit('join_error', { msg: 'Private lobby not found. Check your code.' }); return; }
+    } else {
+      lid = parseInt(lobby);
+      l = lobbies[lid];
+      if (!l) return;
+    }
+
+    if (Object.keys(l.players).length >= MAX_PLAYERS) { socket.emit('lobby_full'); return; }
+
+    // Name uniqueness within lobby
+    const nameTaken = Object.values(l.players).some(p => p.name.toLowerCase() === cleanName.toLowerCase());
+    if (nameTaken) { socket.emit('join_error', { msg: `Name "${cleanName}" is already in use. Pick another!` }); return; }
+
+    // Leave previous lobby room
     if (lobbyId) {
       socket.leave(`lobby_${lobbyId}`);
-      delete lobbies[lobbyId].players[id];
+      const prev = getLobby(lobbyId);
+      if (prev) delete prev.players[id];
     }
-    lobbyId = lobby;
-    socket.join(`lobby_${lobby}`);
+    lobbyId = lid;
+    socket.join(`lobby_${lid}`);
+
     l.players[id] = {
-      id, name: (name || 'Player').slice(0, 16),
+      id, name: cleanName, hat: hat || null,
       x: 200 + Math.random() * (MAP_W - 400),
       y: 200 + Math.random() * (MAP_H - 400),
       z: 0, vz: 0, onGround: true,
@@ -272,13 +311,13 @@ io.on('connection', (socket) => {
     socket.emit('joined', {
       id, mapW: MAP_W, mapH: MAP_H,
       obstacles: l.obstacles, platforms: PLATFORMS, portal: PORTAL_POS,
-      lobbyId: lobby
+      lobbyId: lid
     });
   });
 
   socket.on('input', ({ keys, angle, kameCharging }) => {
     if (!lobbyId) return;
-    const p = lobbies[lobbyId].players[id];
+    const p = getLobby(lobbyId)?.players[id];
     if (!p || !p.alive) return;
     p.keys = keys; p.angle = angle;
     p.kameCharging = !!kameCharging;
@@ -286,15 +325,36 @@ io.on('connection', (socket) => {
 
   socket.on('jump', () => {
     if (!lobbyId) return;
-    const p = lobbies[lobbyId].players[id];
+    const p = getLobby(lobbyId)?.players[id];
     if (!p || !p.alive || !p.onGround) return;
     p.vz = JUMP_FORCE; p.onGround = false;
   });
 
+  socket.on('set_hat', ({ hat }) => {
+    if (!lobbyId) return;
+    const p = getLobby(lobbyId)?.players[id];
+    if (p) p.hat = hat || null;
+  });
+
+  socket.on('redeem_code', ({ code }) => {
+    const key = (code || '').toUpperCase().trim();
+    const codeData = REDEEM_CODES[key];
+    if (!codeData) { socket.emit('code_result', { ok: false, msg: 'Invalid code. Check spelling and try again.' }); return; }
+    if (!usedCodesBySocket[id]) usedCodesBySocket[id] = new Set();
+    if (usedCodesBySocket[id].has(key)) { socket.emit('code_result', { ok: false, msg: 'You already redeemed this code.' }); return; }
+    usedCodesBySocket[id].add(key);
+    if (codeData.type === 'ability' && codeData.ability === 'admin_kill') {
+      hasAdminKill = true;
+      socket.emit('code_result', { ok: true, type: 'ability', ability: 'admin_kill', msg: 'Special ability unlocked! Right-click players to use.' });
+    } else {
+      socket.emit('code_result', { ok: true, type: 'coins', coins: codeData.coins, msg: `+${codeData.coins} coins added!` });
+    }
+  });
+
   socket.on('throw', ({ angle }) => {
     if (!lobbyId) return;
-    const l = lobbies[lobbyId];
-    const p = l.players[id];
+    const l = getLobby(lobbyId);
+    const p = l?.players[id];
     if (!p || !p.alive || p.rockCooldown > 0 || p.ammo <= 0) return;
     p.rockCooldown = ROCK_COOLDOWN; p.ammo--;
     l.rocks.push({
@@ -309,14 +369,14 @@ io.on('connection', (socket) => {
 
   socket.on('shield', () => {
     if (!lobbyId) return;
-    const p = lobbies[lobbyId].players[id];
+    const p = getLobby(lobbyId)?.players[id];
     if (!p || !p.alive || p.shieldCooldown > 0 || p.shieldActive) return;
     p.shieldActive = true; p.shieldTimer = SHIELD_DURATION; p.shieldCooldown = SHIELD_COOLDOWN;
   });
 
   socket.on('dash', () => {
     if (!lobbyId) return;
-    const p = lobbies[lobbyId].players[id];
+    const p = getLobby(lobbyId)?.players[id];
     if (!p || !p.alive || p.dashCooldown > 0) return;
     p.dashCooldown = DASH_COOLDOWN;
     const fwdX = Math.cos(p.angle), fwdY = Math.sin(p.angle);
@@ -332,8 +392,8 @@ io.on('connection', (socket) => {
 
   socket.on('kamehameha', ({ angle, pitch }) => {
     if (!lobbyId) return;
-    const l = lobbies[lobbyId];
-    const p = l.players[id];
+    const l = getLobby(lobbyId);
+    const p = l?.players[id];
     if (!p || !p.alive || p.kameCooldown > 0) return;
     p.kameCooldown = KAME_COOLDOWN;
     // Beam stops at first wall — find actual endpoint
@@ -377,7 +437,7 @@ io.on('connection', (socket) => {
 
   socket.on('heal', () => {
     if (!lobbyId) return;
-    const p = lobbies[lobbyId].players[id];
+    const p = getLobby(lobbyId)?.players[id];
     if (!p || !p.alive || p.healCooldown > 0) return;
     p.hp = Math.min(MAX_HP, p.hp + HEAL_AMOUNT);
     p.healCooldown = HEAL_COOLDOWN;
@@ -386,8 +446,8 @@ io.on('connection', (socket) => {
 
   socket.on('shockwave', () => {
     if (!lobbyId) return;
-    const l = lobbies[lobbyId];
-    const p = l.players[id];
+    const l = getLobby(lobbyId);
+    const p = l?.players[id];
     if (!p || !p.alive || p.shockwaveCooldown > 0) return;
     p.shockwaveCooldown = SHOCKWAVE_COOLDOWN;
     // Push players in radius and deal 5 damage
@@ -413,10 +473,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('admin_kill', ({ targetId }) => {
-    if (!lobbyId) return;
-    const l = lobbies[lobbyId];
-    const p = l.players[id];
-    if (!p || !p.alive || p.name !== 'Mateo') return;
+    if (!lobbyId || !hasAdminKill) return;
+    const l = getLobby(lobbyId);
+    const p = l?.players[id];
+    if (!p || !p.alive) return;
     const target = l.players[targetId];
     if (!target || !target.alive) return;
     target.hp = 0; target.alive = false; target.respawnTimer = RESPAWN_TIME;
@@ -426,13 +486,16 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     if (!lobbyId) return;
-    delete lobbies[lobbyId].players[id];
+    const l = getLobby(lobbyId);
+    if (l) delete l.players[id];
+    delete usedCodesBySocket[id];
   });
 });
 
 setInterval(() => {
-  for (const lid in lobbies) {
-    const l = lobbies[lid];
+  const allLobbies = Object.assign({}, lobbies, privateLobbies);
+  for (const lid in allLobbies) {
+    const l = allLobbies[lid];
     const portalExits = [];
 
     for (const pid in l.players) {
@@ -588,6 +651,7 @@ setInterval(() => {
       players: Object.values(l.players).map(p => ({
         id: p.id, name: p.name, x: p.x, y: p.y, z: p.z,
         hp: p.hp, alive: p.alive, color: p.color, angle: p.angle,
+        hat: p.hat || null,
         ready: p.rockCooldown === 0, kamReady: p.kameCooldown === 0,
         dashCooldown: p.dashCooldown, shieldActive: p.shieldActive,
         shieldCooldown: p.shieldCooldown, ammo: p.ammo,
@@ -607,6 +671,30 @@ setInterval(() => {
 
 app.get('/api/lobbies', (req, res) => {
   res.json(Object.keys(lobbies).map(id => ({ id: parseInt(id), count: playerCount(id), max: MAX_PLAYERS })));
+});
+
+app.post('/api/private/create', (req, res) => {
+  let code;
+  do { code = generateLobbyCode(); } while (privateLobbies[code]);
+  privateLobbies[code] = {
+    id: code, isPrivate: true,
+    players: {}, rocks: [], beams: [], rockCounter: 0,
+    obstacles: OBSTACLES_1
+  };
+  // Auto-clean private lobbies that have been empty for 30min
+  setTimeout(() => {
+    if (privateLobbies[code] && Object.keys(privateLobbies[code].players).length === 0) {
+      delete privateLobbies[code];
+    }
+  }, 30 * 60 * 1000);
+  res.json({ code });
+});
+
+app.get('/api/private/:code', (req, res) => {
+  const code = req.params.code.toUpperCase();
+  const l = privateLobbies[code];
+  if (!l) return res.json({ exists: false });
+  res.json({ exists: true, count: Object.keys(l.players).length, max: MAX_PLAYERS });
 });
 
 app.get('/api/leaderboard', (req, res) => {

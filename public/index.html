@@ -87,6 +87,34 @@
     .hint { margin-top: 1.2rem; font-size: 0.68rem; color: #333; letter-spacing: 1px; }
     .setting-row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 0.82rem; color: #aaa; }
 
+    /* PRIVATE LOBBY */
+    .private-section { margin-top: 1.1rem; border-top: 1px solid rgba(255,165,0,0.15); padding-top: 1rem; }
+    .private-row { display: flex; gap: 8px; justify-content: center; align-items: center; margin-bottom: 6px; }
+    #private-join-input {
+      padding: 9px 12px; font-size: 0.9rem; border-radius: 8px;
+      border: 2px solid rgba(255,165,0,0.35); background: rgba(255,255,255,0.05);
+      color: white; outline: none; width: 130px; letter-spacing: 2px; text-transform: uppercase;
+    }
+    #private-code-display { color: orange; font-weight: bold; font-size: 0.9rem; display:none; margin-top: 4px; letter-spacing: 2px; }
+    #join-error { display: none; color: #f44336; font-size: 0.8rem; margin-top: 6px; padding: 6px 12px; background: rgba(244,67,54,0.1); border-radius: 6px; }
+
+    /* SHOP */
+    .shop-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid rgba(255,165,0,0.1); }
+    .shop-label { flex: 1; font-size: 0.9rem; color: #ddd; }
+    .shop-price { min-width: 70px; text-align: right; font-size: 0.82rem; }
+    .coin-display { color: #FFD700; font-weight: bold; font-size: 1rem; }
+
+    /* CODES */
+    #code-input {
+      padding: 10px 14px; font-size: 0.95rem; border-radius: 8px;
+      border: 2px solid rgba(255,165,0,0.4); background: rgba(255,255,255,0.05);
+      color: white; outline: none; width: 200px; letter-spacing: 1px; text-transform: uppercase;
+    }
+    #code-msg { font-size: 0.82rem; margin-top: 8px; min-height: 18px; }
+
+    /* QUESTS */
+    .quest-item { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,165,0,0.1); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+
     /* GAME */
     #game { display: none; position: fixed; inset: 0; z-index: 2; }
     #canvas { display: block; cursor: none; width: 100%; height: 100%; touch-action: none; }
@@ -110,6 +138,8 @@
     <button class="tab-btn active" onclick="showTab('play')">Play</button>
     <button class="tab-btn" onclick="showTab('rules')">How To Play</button>
     <button class="tab-btn" onclick="showTab('killfx')">Kill FX</button>
+    <button class="tab-btn" onclick="showTab('shop')">Shop</button>
+    <button class="tab-btn" onclick="showTab('codes')">Codes</button>
     <button class="tab-btn" onclick="showTab('settings')">Settings</button>
   </div>
 
@@ -124,7 +154,20 @@
       <button class="lobby-btn" data-lobby="2">Lobby 2<br><span class="cnt">?/10</span></button>
       <button class="lobby-btn" data-lobby="3">Lobby 3<br><span class="cnt">?/10</span></button>
     </div>
-    <p class="hint">WASD move &nbsp;·&nbsp; Mouse aim &nbsp;·&nbsp; Left-click throw &nbsp;·&nbsp; Space dash &nbsp;·&nbsp; Q shield &nbsp;·&nbsp; E heal &nbsp;·&nbsp; R shockwave &nbsp;·&nbsp; F Laser Beam &nbsp;·&nbsp; Mobile joystick + buttons supported</p>
+    <div id="join-error"></div>
+
+    <!-- Private Lobby -->
+    <div class="private-section">
+      <div style="color:#888;font-size:0.75rem;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">Private Lobby</div>
+      <div class="private-row">
+        <button class="lobby-btn" style="min-width:unset;padding:10px 16px" onclick="createPrivateLobby()">＋ Create</button>
+        <input id="private-join-input" type="text" placeholder="CODE" maxlength="6" />
+        <button class="lobby-btn" style="min-width:unset;padding:10px 16px" onclick="joinPrivateLobby()">Join →</button>
+      </div>
+      <div id="private-code-display"></div>
+    </div>
+
+    <p class="hint">Enter a name before joining &nbsp;·&nbsp; Names must be unique per lobby &nbsp;·&nbsp; Mobile joystick + buttons supported</p>
   </div>
 
   <!-- HOW TO PLAY TAB -->
@@ -175,6 +218,40 @@
     </div>
   </div>
 
+  <!-- SHOP TAB -->
+  <div id="tab-shop" style="display:none; text-align:left">
+    <div class="rules-section">
+      <h3>Hat Shop</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+        <p style="color:#888;font-size:0.78rem">Earn coins from quests and codes. Buy hats to wear in game!</p>
+        <span class="coin-display" style="font-size:1.1rem">🪙 0</span>
+      </div>
+      <div id="shop-list" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+  </div>
+
+  <!-- CODES TAB -->
+  <div id="tab-codes" style="display:none; text-align:left">
+    <div class="rules-section">
+      <h3>Redeem a Code</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem">
+        <p style="color:#888;font-size:0.78rem">Enter a code to earn coins or unlock special abilities.</p>
+        <span class="coin-display">🪙 0</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:4px">
+        <input id="code-input" type="text" placeholder="ENTER CODE" maxlength="20"
+          onkeydown="if(event.key==='Enter') redeemCode()" />
+        <button class="lobby-btn" style="min-width:unset;padding:10px 18px" onclick="redeemCode()">Redeem</button>
+      </div>
+      <div id="code-msg" style="font-size:0.82rem;margin-bottom:1.2rem;min-height:18px"></div>
+    </div>
+    <div class="rules-section">
+      <h3>Daily Quests</h3>
+      <p style="color:#888;font-size:0.78rem;margin-bottom:0.8rem">Quests reset every day. Complete them for coins!</p>
+      <div id="quest-list"></div>
+    </div>
+  </div>
+
   <!-- SETTINGS TAB -->
   <div id="tab-settings" style="display:none">
     <div class="rules-section">
@@ -215,11 +292,16 @@
 
 <script>
   const KILL_FX_OPTIONS = [
-    { id: 'fire',     label: '🔥 Fire Burst',    desc: 'Eruption of fire and embers' },
-    { id: 'supernova',label: '✨ Supernova',      desc: 'Rainbow-colored shockwave explosion' },
-    { id: 'electric', label: '⚡ Electric',       desc: 'Crackling cyan lightning sparks' },
-    { id: 'void',     label: '🌀 Void Collapse',  desc: 'Dark purple imploding energy' },
-    { id: 'rainbow',  label: '🌈 Rainbow Blast',  desc: 'Colorful confetti explosion' },
+    { id: 'fire',      label: '🔥 Fire Burst',    desc: 'Eruption of fire and embers' },
+    { id: 'supernova', label: '✨ Supernova',      desc: 'Rainbow-colored shockwave explosion' },
+    { id: 'electric',  label: '⚡ Electric',       desc: 'Crackling cyan lightning sparks' },
+    { id: 'void',      label: '🌀 Void Collapse',  desc: 'Dark purple imploding energy' },
+    { id: 'rainbow',   label: '🌈 Rainbow Blast',  desc: 'Colorful confetti explosion' },
+    { id: 'ice',       label: '❄️ Ice Shatter',   desc: 'Crystalline ice fragment burst' },
+    { id: 'explosion', label: '💥 Explosion',      desc: 'Fiery orange bomb explosion' },
+    { id: 'portal',    label: '🌌 Portal Rip',     desc: 'Swirling portal energy' },
+    { id: 'galaxy',    label: '🌠 Galaxy Dust',    desc: 'Deep space star particles' },
+    { id: 'golden',    label: '✨ Golden Touch',   desc: 'Sparkling golden particles' },
   ];
 
   function initKillFXTab() {
@@ -247,24 +329,33 @@
     });
   }
 
+  const ALL_TABS = ['play','rules','killfx','shop','codes','settings'];
   function showTab(name) {
-    ['play','rules','killfx','settings'].forEach(t => {
+    ALL_TABS.forEach(t => {
       document.getElementById('tab-' + t).style.display = t === name ? 'block' : 'none';
     });
     document.querySelectorAll('.tab-btn').forEach((b, i) => {
-      b.classList.toggle('active', ['play','rules','killfx','settings'][i] === name);
+      b.classList.toggle('active', ALL_TABS[i] === name);
     });
     if (name === 'settings') loadLeaderboard();
     if (name === 'killfx') initKillFXTab();
+    if (name === 'shop') { if (window.buildShop) window.buildShop(); }
+    if (name === 'codes') { if (window.buildQuestList) window.buildQuestList(); }
+    updateCoinDisplay();
     // Sync slider displays from localStorage
     const rawS = parseFloat(localStorage.getItem('ra_sens') || '3');
-    const sDisplay = rawS < 0.1 ? Math.round(rawS * 1000 * 10) / 10 : rawS; // migrate old format
+    const sDisplay = rawS < 0.1 ? Math.round(rawS * 1000 * 10) / 10 : rawS;
     const f = localStorage.getItem('ra_fov_deg') || '110';
     document.querySelector('[oninput*="sens"]').value = sDisplay;
     document.getElementById('sens-val').textContent = sDisplay % 1 === 0 ? sDisplay.toFixed(0) : sDisplay.toFixed(1);
     document.querySelector('[oninput*="fov"]').value = f;
     document.getElementById('fov-val').textContent = Math.round(parseFloat(f)) + '°';
   }
+  function updateCoinDisplay() {
+    const coins = parseInt(localStorage.getItem('ra_coins') || '0');
+    document.querySelectorAll('.coin-display').forEach(el => el.textContent = '🪙 ' + coins);
+  }
+  updateCoinDisplay();
   function loadLeaderboard() {
     fetch('/api/leaderboard').then(r => r.json()).then(data => {
       const el = document.getElementById('leaderboard-list');
