@@ -228,6 +228,11 @@ io.on('connection', (socket) => {
     const l = lobbies[lobby];
     if (!l) return;
     if (playerCount(lobby) >= MAX_PLAYERS) { socket.emit('lobby_full'); return; }
+    // Leave previous lobby room so we don't receive state from both lobbies
+    if (lobbyId) {
+      socket.leave(`lobby_${lobbyId}`);
+      delete lobbies[lobbyId].players[id];
+    }
     lobbyId = lobby;
     socket.join(`lobby_${lobby}`);
     l.players[id] = {
@@ -465,9 +470,11 @@ setInterval(() => {
 
     portalExits.forEach(pid => {
       const leavingName = l.players[pid]?.name || 'Player';
+      // Remove from socket.io room so they stop receiving this lobby's state
+      const leavingSocket = io.sockets.sockets.get(pid);
+      if (leavingSocket) leavingSocket.leave(`lobby_${lid}`);
       io.to(pid).emit('portal_exit');
       delete l.players[pid];
-      // Notify the rest of the lobby
       io.to(`lobby_${lid}`).emit('player_left', { name: leavingName });
     });
 

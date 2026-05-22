@@ -57,6 +57,11 @@ let prevHP = 75;
 let shieldBlockFX = [];
 let shockwaveFX = [];   // { x, y, r, maxR, timer, maxTimer }
 let meteorWarning = 0;
+
+// ── Mobile detection ───────────────────────────────────────────
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+  ('ontouchstart' in window && navigator.maxTouchPoints > 0 && window.innerWidth < 1400);
+
 let killFXType = localStorage.getItem('ra_kill_fx') || 'fire';
 let killFXParticles = []; // { wx, wy, wz, vwx, vwy, vwz, timer, maxTimer, type, size }
 window.setKillFX = function(type) {
@@ -77,6 +82,50 @@ function resizeCanvas() {
 }
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
+
+// ── Sound Effects (Web Audio API) ─────────────────────────────
+let _ac = null;
+function sfxCtx() {
+  if (!_ac) _ac = new (window.AudioContext || window.webkitAudioContext)();
+  if (_ac.state === 'suspended') _ac.resume();
+  return _ac;
+}
+function _osc(type, freq0, freq1, dur, vol) {
+  try {
+    const c = sfxCtx(), o = c.createOscillator(), g = c.createGain();
+    o.connect(g); g.connect(c.destination); o.type = type;
+    o.frequency.setValueAtTime(freq0, c.currentTime);
+    if (freq1) o.frequency.exponentialRampToValueAtTime(freq1, c.currentTime + dur);
+    g.gain.setValueAtTime(vol, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+    o.start(c.currentTime); o.stop(c.currentTime + dur);
+  } catch(e) {}
+}
+function _noise(dur, vol, cutoff) {
+  try {
+    const c = sfxCtx(), n = c.sampleRate * dur;
+    const buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random()*2-1) * (1 - i/n);
+    const src = c.createBufferSource(), g = c.createGain(), f = c.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = cutoff || 1200;
+    src.buffer = buf; src.connect(f); f.connect(g); g.connect(c.destination);
+    g.gain.setValueAtTime(vol, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+    src.start(c.currentTime); src.stop(c.currentTime + dur);
+  } catch(e) {}
+}
+const sfx = {
+  throw:    () => _osc('sawtooth', 280, 65,  0.18, 0.25),
+  hit:      () => _noise(0.12, 0.45, 900),
+  shield:   () => _osc('sine',    700, 1300, 0.18, 0.18),
+  heal:     () => { [523,659,784].forEach((f,i) => setTimeout(() => _osc('sine',f,f*1.01,0.18,0.13), i*70)); },
+  dash:     () => _osc('sine',    440, 180,  0.14, 0.2),
+  shockwave:() => _noise(0.45, 0.55, 200),
+  laserCharge: () => _osc('sawtooth', 90, 600, 1.4, 0.12),
+  laserFire:   () => _osc('square',  900, 70,  0.5,  0.32),
+  kill:     () => { [220,330,440,550].forEach((f,i) => setTimeout(() => _osc('sine',f,f,0.22,0.18), i*55)); },
+  meteor:   () => _noise(0.5, 0.4, 180),
+};
 
 // ── Title animation ────────────────────────────────────────────
 const bgCanvas = document.getElementById('bg');
@@ -155,22 +204,23 @@ socket.on('kill', ({ killer, victim, streak, victimX, victimY }) => {
   if (killFeed.length > 5) killFeed.pop();
   // Track our own kills
   const me = serverState?.players.find(p => p.id === myId);
-  if (me && killer === me.name) sessionKillCount++;
+  if (me && killer === me.name) { sessionKillCount++; sfx.kill(); }
   // Spawn kill effect at victim position
   if (victimX !== undefined && victimY !== undefined) {
     spawnKillFX(victimX, victimY, killFXType);
   }
 });
-socket.on('hit_flash', () => { hitFlash = 1.0; });
-socket.on('healed', () => { healFlash = 1.0; });
+socket.on('hit_flash', () => { hitFlash = 1.0; sfx.hit(); });
+socket.on('healed', () => { healFlash = 1.0; sfx.heal(); });
 socket.on('shockwave_fx', ({ x, y, r }) => {
   shockwaveFX.push({ x, y, maxR: r, timer: 40, maxTimer: 40 });
 });
 socket.on('shield_block', ({ x, y }) => {
+  sfx.shield();
   shieldBlockFX.push({ x, y, timer: 30 });
 });
 socket.on('meteor_shower', ({ shooter }) => {
-  meteorShake = 60; meteorWarning = 180;
+  meteorShake = 60; meteorWarning = 180; sfx.meteor();
   killFeed.unshift({ text: `☄  ${shooter} called meteor shower!`, timer: 300, isStreak: true });
   if (killFeed.length > 5) killFeed.pop();
 });
@@ -240,10 +290,10 @@ document.addEventListener('keydown', e => {
   if (e.key === 'a' || e.key === 'ArrowLeft')  keys.left  = true;
   if (e.key === 'd' || e.key === 'ArrowRight') keys.right = true;
   if (e.key === 'f' || e.key === 'F') kame.held = true;
-  if (e.key === ' ') { e.preventDefault(); socket.emit('dash'); }
-  if (e.key === 'q' || e.key === 'Q') socket.emit('shield');
+  if (e.key === ' ') { e.preventDefault(); socket.emit('dash'); sfx.dash(); }
+  if (e.key === 'q' || e.key === 'Q') { socket.emit('shield'); sfx.shield(); }
   if (e.key === 'e' || e.key === 'E') socket.emit('heal');
-  if (e.key === 'r' || e.key === 'R') socket.emit('shockwave');
+  if (e.key === 'r' || e.key === 'R') { socket.emit('shockwave'); sfx.shockwave(); }
 });
 document.addEventListener('keyup', e => {
   if (!gameActive) return;
@@ -262,12 +312,20 @@ document.addEventListener('mousemove', e => {
   pitchAngle = Math.max(-0.55, Math.min(0.55, pitchAngle));
 });
 canvas.addEventListener('mousedown', e => {
-  if (!gameActive || !myId || !serverState) return;
+  if (isMobile || !gameActive || !myId || !serverState) return;
   if (e.button === 0) {
+    // Left click: lock pointer, then throw rock once locked
+    if (!pointerLocked) { canvas.requestPointerLock(); return; }
     const me = serverState.players.find(p => p.id === myId);
-    // Admin kill — works for player named exactly "Mateo" (pointer lock not required)
+    if (me && me.alive && me.ready && hand.state === 'idle' && myAmmo > 0) {
+      hand.state = 'windup'; hand.timer = 0; hand.rockSent = false;
+    }
+    return;
+  }
+  if (e.button === 2) {
+    // Right click: Mateo admin kill only
+    const me = serverState.players.find(p => p.id === myId);
     if (me && me.name === 'Mateo') {
-      // Find closest player on screen to crosshair (generous 350px radius)
       let closest = null, closestDist = 350;
       serverState.players.forEach(p => {
         if (p.id === myId || !p.alive) return;
@@ -276,27 +334,177 @@ canvas.addEventListener('mousedown', e => {
         const dist = Math.hypot(proj.sx - CW / 2, proj.sy - CH / 2);
         if (dist < closestDist) { closestDist = dist; closest = p; }
       });
-      if (closest) { socket.emit('admin_kill', { targetId: closest.id }); return; }
+      if (closest) socket.emit('admin_kill', { targetId: closest.id });
     }
-    canvas.requestPointerLock(); return;
-  }
-  if (e.button !== 2) return;
-  const me2 = serverState.players.find(p => p.id === myId);
-  if (me2 && me2.alive && me2.ready && hand.state === 'idle' && myAmmo > 0) {
-    hand.state = 'windup'; hand.timer = 0; hand.rockSent = false;
   }
 });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ── Mobile controls ────────────────────────────────────────────
+const mob = {
+  joy: { active: false, id: null, baseX: 0, baseY: 0, dx: 0, dy: 0 },
+  cam: { active: false, id: null, lx: 0, ly: 0 },
+  btns: {},  // id → { pressed, touchId }
+};
+
+function getMobBtns() {
+  const ms = Math.min(CW, CH);
+  return [
+    { id:'shoot',  label:'SHOOT', color:[255,80,80],   r:ms*0.13,  x:CW-ms*0.17, y:CH-ms*0.22 },
+    { id:'laser',  label:'LASER', color:[80,200,255],  r:ms*0.085, x:CW-ms*0.34, y:CH-ms*0.35 },
+    { id:'heal',   label:'HEAL',  color:[60,220,100],  r:ms*0.082, x:CW-ms*0.17, y:CH-ms*0.42 },
+    { id:'shield', label:'SHIELD',color:[100,180,255], r:ms*0.082, x:CW-ms*0.33, y:CH-ms*0.20 },
+    { id:'wave',   label:'WAVE',  color:[180,100,255], r:ms*0.082, x:CW-ms*0.47, y:CH-ms*0.27 },
+    { id:'dash',   label:'DASH',  color:[255,200,80],  r:ms*0.082, x:CW-ms*0.09, y:CH-ms*0.09 },
+  ];
+}
+
+function mobBtnDown(id) {
+  if (!myId || !serverState) return;
+  if (id === 'shoot') {
+    const me = serverState.players.find(p => p.id === myId);
+    if (me && me.alive && me.ready && hand.state === 'idle' && myAmmo > 0) {
+      hand.state = 'windup'; hand.timer = 0; hand.rockSent = false;
+    }
+  } else if (id === 'laser') { kame.held = true; }
+  else if (id === 'heal')   { socket.emit('heal'); }
+  else if (id === 'shield') { socket.emit('shield'); sfx.shield(); }
+  else if (id === 'wave')   { socket.emit('shockwave'); sfx.shockwave(); }
+  else if (id === 'dash')   { socket.emit('dash'); sfx.dash(); }
+}
+function mobBtnUp(id) {
+  if (id === 'laser') { kame.held = false; if (!kame.firing) kame.charge = 0; }
+}
+
+function onTouchStart(e) {
+  e.preventDefault();
+  sfxCtx(); // wake AudioContext on first touch
+  const btns = getMobBtns();
+  Array.from(e.changedTouches).forEach(t => {
+    const tx = t.clientX, ty = t.clientY, tid = t.identifier;
+    // Check buttons first
+    for (const btn of btns) {
+      if (Math.hypot(tx - btn.x, ty - btn.y) < btn.r) {
+        mob.btns[btn.id] = { pressed: true, touchId: tid };
+        mobBtnDown(btn.id);
+        return;
+      }
+    }
+    // Joystick zone: left 42% of screen
+    if (tx < CW * 0.42 && !mob.joy.active) {
+      mob.joy.active = true; mob.joy.id = tid;
+      mob.joy.baseX = tx; mob.joy.baseY = ty;
+      mob.joy.dx = 0; mob.joy.dy = 0;
+      return;
+    }
+    // Camera rotation
+    if (!mob.cam.active) {
+      mob.cam.active = true; mob.cam.id = tid;
+      mob.cam.lx = tx; mob.cam.ly = ty;
+    }
+  });
+}
+
+function onTouchMove(e) {
+  e.preventDefault();
+  const ms = Math.min(CW, CH), maxR = ms * 0.14;
+  Array.from(e.changedTouches).forEach(t => {
+    const tx = t.clientX, ty = t.clientY, tid = t.identifier;
+    // Skip button touches
+    for (const s of Object.values(mob.btns)) { if (s.touchId === tid) return; }
+    // Joystick
+    if (mob.joy.active && mob.joy.id === tid) {
+      let dx = tx - mob.joy.baseX, dy = ty - mob.joy.baseY;
+      const dist = Math.hypot(dx, dy);
+      if (dist > maxR) { dx = dx/dist*maxR; dy = dy/dist*maxR; }
+      mob.joy.dx = dx; mob.joy.dy = dy;
+      const thr = maxR * 0.28;
+      keys.up    = dy < -thr; keys.down  = dy > thr;
+      keys.left  = dx < -thr; keys.right = dx > thr;
+      return;
+    }
+    // Camera
+    if (mob.cam.active && mob.cam.id === tid) {
+      worldAngle += (tx - mob.cam.lx) * SENSITIVITY * 0.85;
+      pitchAngle  = Math.max(-0.55, Math.min(0.55, pitchAngle + (ty - mob.cam.ly) * SENSITIVITY * 0.85));
+      mob.cam.lx = tx; mob.cam.ly = ty;
+    }
+  });
+}
+
+function onTouchEnd(e) {
+  e.preventDefault();
+  Array.from(e.changedTouches).forEach(t => {
+    const tid = t.identifier;
+    for (const [id, s] of Object.entries(mob.btns)) {
+      if (s.touchId === tid) { mobBtnUp(id); delete mob.btns[id]; return; }
+    }
+    if (mob.joy.active && mob.joy.id === tid) {
+      mob.joy.active = false; mob.joy.dx = 0; mob.joy.dy = 0;
+      keys.up = keys.down = keys.left = keys.right = false;
+      return;
+    }
+    if (mob.cam.active && mob.cam.id === tid) mob.cam.active = false;
+  });
+}
+
+if (isMobile) {
+  canvas.addEventListener('touchstart',  onTouchStart,  { passive: false });
+  canvas.addEventListener('touchmove',   onTouchMove,   { passive: false });
+  canvas.addEventListener('touchend',    onTouchEnd,    { passive: false });
+  canvas.addEventListener('touchcancel', onTouchEnd,    { passive: false });
+}
+
+function drawMobileControls() {
+  if (!isMobile || !gameActive) return;
+  const ms = Math.min(CW, CH), btns = getMobBtns();
+  const maxR = ms * 0.14, knobR = ms * 0.07;
+
+  // Joystick base (always visible, dimly)
+  const jbx = mob.joy.active ? mob.joy.baseX : CW * 0.15;
+  const jby = mob.joy.active ? mob.joy.baseY : CH * 0.80;
+  ctx.save(); ctx.globalAlpha = mob.joy.active ? 0.55 : 0.3;
+  ctx.beginPath(); ctx.arc(jbx, jby, maxR, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fill();
+  if (mob.joy.active) {
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath(); ctx.arc(jbx + mob.joy.dx, jby + mob.joy.dy, knobR, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fill();
+  }
+  ctx.globalAlpha = 1; ctx.restore();
+
+  // Action buttons
+  btns.forEach(btn => {
+    const pressed = mob.btns[btn.id]?.pressed;
+    const [r2,g2,b2] = btn.color;
+    ctx.save();
+    ctx.globalAlpha = pressed ? 0.92 : 0.68;
+    ctx.beginPath(); ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(${r2},${g2},${b2},${pressed?0.45:0.2})`; ctx.fill();
+    ctx.strokeStyle = `rgba(${r2},${g2},${b2},${pressed?1:0.75})`;
+    ctx.lineWidth = pressed ? 3.5 : 2.5;
+    if (pressed) { ctx.shadowColor = `rgba(${r2},${g2},${b2},0.9)`; ctx.shadowBlur = 14; }
+    ctx.stroke(); ctx.shadowBlur = 0;
+    ctx.fillStyle = `rgba(255,255,255,${pressed?1:0.9})`;
+    ctx.font = `bold ${Math.round(btn.r * 0.38)}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(btn.label, btn.x, btn.y);
+    ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1; ctx.restore();
+  });
+}
 
 // ── Game tick ──────────────────────────────────────────────────
 setInterval(() => {
   if (!myId || !gameActive) return;
   socket.emit('input', { keys, angle: worldAngle, kameCharging: kame.charge > 0 });
   if (kame.held && kame.cooldown === 0 && !kame.firing) {
+    if (kame.charge === 0) sfx.laserCharge();
     kame.charge++;
     if (kame.charge >= kame.maxCharge) {
       kame.held = false; kame.charge = 0;
       kame.cooldown = kame.maxCooldown; kame.firing = true; kame.fireTimer = 40;
+      sfx.laserFire();
       socket.emit('kamehameha', { angle: worldAngle, pitch: pitchAngle });
     }
   }
@@ -305,7 +513,7 @@ setInterval(() => {
   if (hand.state !== 'idle') {
     hand.timer++;
     if (hand.state === 'throw' && hand.timer === 4 && !hand.rockSent) {
-      hand.rockSent = true; socket.emit('throw', { angle: worldAngle });
+      hand.rockSent = true; sfx.throw(); socket.emit('throw', { angle: worldAngle });
     }
     if (hand.timer >= hand.dur[hand.state]) {
       hand.timer = 0;
@@ -874,7 +1082,7 @@ function drawKameText() {
     ctx.save(); ctx.font = 'bold 28px Impact, fantasy';
     ctx.fillStyle = `rgba(255,240,80,${ta})`; ctx.textAlign = 'center';
     ctx.shadowColor = 'rgba(80,200,255,0.9)'; ctx.shadowBlur = 16;
-    ctx.fillText('KAMEHAMEHA!!!', CW / 2, 46); ctx.restore();
+    ctx.fillText('LASER BEAM!!!', CW / 2, 46); ctx.restore();
   }
 }
 
@@ -974,7 +1182,7 @@ function drawHand() {
       ctx.save(); ctx.font = `bold ${11 + ratio * 10}px sans-serif`;
       ctx.fillStyle = `rgba(255,240,80,${ta2})`; ctx.textAlign = 'center';
       ctx.shadowColor = 'rgba(80,200,255,0.9)'; ctx.shadowBlur = 10;
-      ctx.fillText('KAME... HAME...', CW / 2, CH - 128 - ratio * 22); ctx.restore();
+      ctx.fillText('CHARGING...', CW / 2, CH - 128 - ratio * 22); ctx.restore();
     }
   }
 }
@@ -1084,7 +1292,7 @@ function drawHUD() {
 
   // ── Cooldown ability bars (left side) ─────────────────────────
   const bars = [
-    { label: 'F  KAME',    ready: kame.cooldown <= 0,
+    { label: 'F  LASER',   ready: kame.cooldown <= 0,
       pct: kame.cooldown <= 0 ? 1 : 1 - kame.cooldown / kame.maxCooldown,
       color: [80, 200, 255], active: kame.firing },
     { label: 'Q  SHIELD',  ready: shieldCooldown <= 0 && !shieldActive,
@@ -1174,7 +1382,9 @@ function drawHUD() {
 
 function drawMinimap() {
   if (!serverState) return;
-  const mx = CW - 178, my = CH - 152, mw = 162, mh = 122;
+  const mw = 162, mh = 122;
+  const mx = isMobile ? 8 : CW - 178;
+  const my = isMobile ? 8 : CH - 152;
   const sx = mw / WORLD_W, sy2 = mh / WORLD_H;
   ctx.fillStyle = 'rgba(0,0,0,0.7)'; roundRect(ctx, mx-2, my-2, mw+4, mh+4, 6); ctx.fill();
   ctx.fillStyle = 'rgba(8,5,20,0.92)'; ctx.fillRect(mx, my, mw, mh);
@@ -1375,7 +1585,8 @@ function render() {
   drawHUD();
   drawCompass();
   drawMinimap();
-  drawCursor();
+  if (!isMobile) drawCursor();
+  drawMobileControls();
 
   if (meteorShake > 0) ctx.restore();
 

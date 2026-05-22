@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Rock Arena</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -88,7 +89,7 @@
 
     /* GAME */
     #game { display: none; position: fixed; inset: 0; z-index: 2; }
-    #canvas { display: block; cursor: none; width: 100%; height: 100%; }
+    #canvas { display: block; cursor: none; width: 100%; height: 100%; touch-action: none; }
 
     /* OVERLAY */
     #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 20; }
@@ -123,7 +124,7 @@
       <button class="lobby-btn" data-lobby="2">Lobby 2<br><span class="cnt">?/10</span></button>
       <button class="lobby-btn" data-lobby="3">Lobby 3<br><span class="cnt">?/10</span></button>
     </div>
-    <p class="hint">WASD move &nbsp;·&nbsp; Mouse aim &nbsp;·&nbsp; Right-click throw &nbsp;·&nbsp; Space dash &nbsp;·&nbsp; Q shield &nbsp;·&nbsp; E heal &nbsp;·&nbsp; R shockwave &nbsp;·&nbsp; F Kamehameha</p>
+    <p class="hint">WASD move &nbsp;·&nbsp; Mouse aim &nbsp;·&nbsp; Left-click throw &nbsp;·&nbsp; Space dash &nbsp;·&nbsp; Q shield &nbsp;·&nbsp; E heal &nbsp;·&nbsp; R shockwave &nbsp;·&nbsp; F Laser Beam &nbsp;·&nbsp; Mobile joystick + buttons supported</p>
   </div>
 
   <!-- HOW TO PLAY TAB -->
@@ -132,20 +133,20 @@
       <h3>Controls</h3>
       <div class="key-row"><span class="key">W A S D</span> Move (relative to where you're looking)</div>
       <div class="key-row"><span class="key">Mouse</span> Look around / aim (horizontal + vertical) — click to capture mouse</div>
-      <div class="key-row"><span class="key">Right click</span> Throw a rock (10 ammo max, refills over time)</div>
+      <div class="key-row"><span class="key">Left click</span> Throw a rock (6 ammo max, refills over time)</div>
       <div class="key-row"><span class="key">Space</span> Dash in your movement direction (3s cooldown)</div>
-      <div class="key-row"><span class="key">Q</span> Raise physical shield — deflects rocks back &amp; blocks Kamehameha</div>
+      <div class="key-row"><span class="key">Q</span> Raise physical shield — deflects rocks back &amp; blocks Laser Beam</div>
       <div class="key-row"><span class="key">E</span> Heal — restore 10 HP instantly (6s cooldown)</div>
       <div class="key-row"><span class="key">R</span> Shockwave — blasts nearby players away from you (no damage, 12s cooldown)</div>
-      <div class="key-row"><span class="key">F</span> Hold to charge Kamehameha laser — releases after 1.5s</div>
+      <div class="key-row"><span class="key">F</span> Hold to charge Laser Beam — releases after 1.5s, pierces multiple players</div>
     </div>
     <div class="rules-section">
       <h3>Rules</h3>
       <ul class="rules-list">
         <li>Each player starts with 75 HP — game is always ongoing, respawn in 3s after death</li>
-        <li>Each rock hit deals 10 damage; Kamehameha deals 30 and pierces multiple players</li>
+        <li>Each rock hit deals 10 damage; Laser Beam deals 30 and pierces multiple players</li>
         <li>Rocks bounce off walls and pillars (up to 4 bounces) — gold glow = bounced rock</li>
-        <li>Shield deflects rocks back at the thrower and blocks Kamehameha completely</li>
+        <li>Shield deflects rocks back at the thrower and blocks Laser Beam completely</li>
         <li>6 ammo max — refills automatically over time</li>
         <li>Get a 3-kill streak to call a meteor shower (3s warning before impact) — you are immune</li>
         <li>Walk into the purple portal (top of map) to return to lobby any time</li>
@@ -157,7 +158,7 @@
       <ul class="rules-list">
         <li>Grind your kill streak: 3 kills → meteor warning → 3s later fire rains down</li>
         <li>Shield deflects rocks back — bait an enemy throw then raise your shield</li>
-        <li>Look up/down with the mouse to aim Kamehameha and rocks at different heights</li>
+        <li>Look up/down with the mouse to aim Laser Beam and rocks at different heights</li>
         <li>Dash to escape tight situations or close gaps fast</li>
         <li>Compass at the top helps navigate — portal is always to the North</li>
         <li>The portal shows on the minimap in the bottom-right corner</li>
