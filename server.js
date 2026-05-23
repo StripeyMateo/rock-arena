@@ -56,25 +56,31 @@ const POTATO_TIME = 900; // 15 seconds × 60 ticks/s
 
 // ── Redeem codes ────────────────────────────────────────────────
 const REDEEM_CODES = {
-  // Public codes (shown in release notes)
-  'ROCKSTAR':    { type: 'coins', coins: 500 },
-  'ARENA2025':   { type: 'coins', coins: 200 },
-  'NEWPLAYER':   { type: 'coins', coins: 150 },
-  'HATKING':     { type: 'coins', coins: 400 },
-  'BALLBUSTER':  { type: 'coins', coins: 300 },
-  'COINFALL':    { type: 'coins', coins: 250 },
-  'STONECOLD':   { type: 'coins', coins: 350 },
-  'ROCKOUT':     { type: 'coins', coins: 450 },
-  'ARENASTAR':   { type: 'coins', coins: 300 },
-  'HATLIFE':     { type: 'coins', coins: 275 },
+  // Public codes (shown in release notes) — all give 150 coins
+  'STONESTORM':   { type: 'coins', coins: 150 },
+  'BOULDERBASH':  { type: 'coins', coins: 150 },
+  'GRAVELPUNCH':  { type: 'coins', coins: 150 },
+  'SLATESLAM':    { type: 'coins', coins: 150 },
+  'QUARRYKING':   { type: 'coins', coins: 150 },
+  'FLINTFIRE':    { type: 'coins', coins: 150 },
+  'PEBBLEPEAK':   { type: 'coins', coins: 150 },
+  'ROCKNROLL':    { type: 'coins', coins: 150 },
+  'ARENARAGE':    { type: 'coins', coins: 150 },
+  'CRYSTALCRUSH': { type: 'coins', coins: 150 },
   // Secret code — never shown publicly
   'MATEO123': { type: 'ability', ability: 'admin_kill' },
 };
 const usedCodesBySocket = {}; // socketId → Set of redeemed keys
 // Global name claiming — cleared on disconnect
 const claimedNames = new Map(); // lowerCaseName → socketId
-// Vote kick tracking
-const voteKickVotes = {}; // targetId → Set<voterId>
+
+// ── Profanity filter ─────────────────────────────────────────────
+const BAD_WORDS = ['fuck','shit','bitch','cunt','dick','nigger','nigga','faggot','retard','rape'];
+function containsBadWord(str) {
+  const lower = (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return BAD_WORDS.some(w => lower.includes(w.replace(/[^a-z0-9]/g, '')));
+}
+
 // Friendly fire helper (skip damage when same team in team lobbies)
 function sameTeam(l, shooterId, targetId) {
   if (!l.isTeamLobby) return false;
@@ -101,7 +107,7 @@ const PLATFORMS = [
 
 const PORTAL_POS = { x: 800, y: 68, r: 50 };
 
-// Lobby 1 — Central Cluster (original layout)
+// Lobby 1 — Central Cluster (original stone pillars, portal path is clear)
 const OBSTACLES_1 = [
   { x: 800,  y: 600, r: 62 },
   { x: 800,  y: 380, r: 42 },
@@ -114,7 +120,7 @@ const OBSTACLES_1 = [
   { x: 1310, y: 960, r: 52 },
   { x: 155,  y: 600, r: 38 },
   { x: 1445, y: 600, r: 38 },
-  { x: 800,  y: 155, r: 38 },
+  // { x: 800, y: 155, r: 38 } — REMOVED: was blocking portal entrance
   { x: 800,  y: 1045,r: 38 },
   { x: 480,  y: 380, r: 28 },
   { x: 1120, y: 380, r: 28 },
@@ -122,46 +128,57 @@ const OBSTACLES_1 = [
   { x: 1120, y: 820, r: 28 },
 ];
 
-// Lobby 2 — Grid Arena (evenly-spaced pillars)
+// Lobby 2 — Lava Fortress: pairs of rocks form cover walls, clear choke points
 const OBSTACLES_2 = [
-  { x: 400,  y: 300, r: 55 },
-  { x: 800,  y: 300, r: 40 },
-  { x: 1200, y: 300, r: 55 },
-  { x: 400,  y: 600, r: 48 },
-  { x: 800,  y: 600, r: 72 },
-  { x: 1200, y: 600, r: 48 },
-  { x: 400,  y: 900, r: 55 },
-  { x: 800,  y: 900, r: 40 },
-  { x: 1200, y: 900, r: 55 },
-  { x: 160,  y: 160, r: 38 },
-  { x: 1440, y: 160, r: 38 },
-  { x: 160,  y: 1040,r: 38 },
-  { x: 1440, y: 1040,r: 38 },
-  { x: 160,  y: 450, r: 32 },
-  { x: 1440, y: 450, r: 32 },
-  { x: 160,  y: 750, r: 32 },
-  { x: 1440, y: 750, r: 32 },
+  // Fortress gate — two pillars on each side of center
+  { x: 660,  y: 600, r: 50 },
+  { x: 940,  y: 600, r: 50 },
+  // Left flank bunkers
+  { x: 330,  y: 370, r: 55 },
+  { x: 240,  y: 500, r: 38 },
+  { x: 330,  y: 830, r: 55 },
+  { x: 240,  y: 700, r: 38 },
+  // Right flank bunkers
+  { x: 1270, y: 370, r: 55 },
+  { x: 1360, y: 500, r: 38 },
+  { x: 1270, y: 830, r: 55 },
+  { x: 1360, y: 700, r: 38 },
+  // Top lane rocks
+  { x: 560,  y: 230, r: 42 },
+  { x: 1040, y: 230, r: 42 },
+  // Bottom lane rocks
+  { x: 560,  y: 970, r: 42 },
+  { x: 1040, y: 970, r: 42 },
+  // Far corner anchors
+  { x: 175,  y: 175, r: 46 },
+  { x: 1425, y: 175, r: 46 },
+  { x: 175,  y: 1025,r: 46 },
+  { x: 1425, y: 1025,r: 46 },
 ];
 
-// Lobby 3 — Ring Arena (outer ring, open center)
+// Lobby 3 — Golden Crater: open arena with scattered boulders for potato chaos
 const OBSTACLES_3 = [
-  { x: 800,  y: 600, r: 55 },
-  { x: 800,  y: 185, r: 52 },
-  { x: 800,  y: 1015,r: 52 },
-  { x: 220,  y: 600, r: 52 },
-  { x: 1380, y: 600, r: 52 },
-  { x: 400,  y: 300, r: 44 },
-  { x: 1200, y: 300, r: 44 },
-  { x: 400,  y: 900, r: 44 },
-  { x: 1200, y: 900, r: 44 },
-  { x: 580,  y: 175, r: 32 },
-  { x: 1020, y: 175, r: 32 },
-  { x: 580,  y: 1025,r: 32 },
-  { x: 1020, y: 1025,r: 32 },
-  { x: 175,  y: 380, r: 30 },
-  { x: 1425, y: 380, r: 30 },
-  { x: 175,  y: 820, r: 30 },
-  { x: 1425, y: 820, r: 30 },
+  // Massive central boulder
+  { x: 800,  y: 600, r: 72 },
+  // Four inner boulders (diamonds from center)
+  { x: 560,  y: 420, r: 48 },
+  { x: 1040, y: 420, r: 48 },
+  { x: 560,  y: 780, r: 48 },
+  { x: 1040, y: 780, r: 48 },
+  // Outer scatter — 8 medium rocks
+  { x: 800,  y: 240, r: 36 },
+  { x: 800,  y: 960, r: 36 },
+  { x: 285,  y: 600, r: 36 },
+  { x: 1315, y: 600, r: 36 },
+  { x: 390,  y: 290, r: 32 },
+  { x: 1210, y: 290, r: 32 },
+  { x: 390,  y: 910, r: 32 },
+  { x: 1210, y: 910, r: 32 },
+  // Corner anchors
+  { x: 175,  y: 175, r: 44 },
+  { x: 1425, y: 175, r: 44 },
+  { x: 175,  y: 1025,r: 44 },
+  { x: 1425, y: 1025,r: 44 },
 ];
 
 const LOBBY_OBSTACLES = { 1: OBSTACLES_1, 2: OBSTACLES_2, 3: OBSTACLES_3 };
@@ -233,13 +250,13 @@ function handleKill(l, lid, killerId, victim) {
     killer: killer.name, victim: victim.name, streak: killer.killStreak,
     victimX: victim.x, victimY: victim.y
   });
-  // Hot potato transfer: if victim had the potato, pass it to killer
+  // Hot potato transfer: if victim had the potato, pass it to killer (timer keeps counting!)
   if (l.isHotPotato && victim.hasPotato) {
     victim.hasPotato = false;
     if (killer.alive) {
       killer.hasPotato = true;
       l.potatoHolder = killerId;
-      l.potatoTimer = POTATO_TIME;
+      // DO NOT reset timer — potato keeps burning
       io.to(`lobby_${lid}`).emit('potato_transferred', { name: killer.name });
     } else {
       const alivePlayers = Object.values(l.players).filter(p => p.alive && p.id !== victim.id);
@@ -247,7 +264,7 @@ function handleKill(l, lid, killerId, victim) {
         const newHolder = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
         newHolder.hasPotato = true;
         l.potatoHolder = newHolder.id;
-        l.potatoTimer = POTATO_TIME;
+        // DO NOT reset timer
         io.to(`lobby_${lid}`).emit('potato_transferred', { name: newHolder.name });
       } else {
         l.potatoActive = false; l.potatoHolder = null; l.potatoStartDelay = 180;
@@ -345,9 +362,33 @@ io.on('connection', (socket) => {
   let hasAdminKill = false; // set per session when code is redeemed
   const id = socket.id;
 
+  socket.on('leave_game', () => {
+    // Player deliberately left (portal exit or menu Leave) — clean up server-side
+    if (lobbyId) {
+      const l = getLobby(lobbyId);
+      if (l) {
+        if (l.isHotPotato && l.players[id]?.hasPotato) {
+          l.potatoHolder = null; l.potatoActive = false; l.potatoStartDelay = 180;
+        }
+        delete l.players[id];
+        // Close private lobby immediately when empty
+        if (typeof lobbyId === 'string' && privateLobbies[lobbyId] &&
+            Object.keys(privateLobbies[lobbyId].players).length === 0) {
+          delete privateLobbies[lobbyId];
+        }
+      }
+      socket.leave(`lobby_${lobbyId}`);
+      lobbyId = null;
+    }
+  });
+
   socket.on('join', ({ lobby, name, color, hat, isPrivate }) => {
     const cleanName = (name || '').trim().slice(0, 16);
     if (!cleanName) { socket.emit('join_error', { msg: 'Please enter a name to play!' }); return; }
+    // Profanity check on name
+    if (containsBadWord(cleanName)) {
+      socket.emit('join_error', { msg: 'That name is not allowed. Please choose another.' }); return;
+    }
 
     let l, lid;
     if (isPrivate) {
@@ -470,7 +511,7 @@ io.on('connection', (socket) => {
       y: p.y + Math.sin(angle) * (PLAYER_R + ROCK_R + 2),
       vx: Math.cos(angle) * ROCK_SPEED, vy: Math.sin(angle) * ROCK_SPEED,
       z: p.z + 12, vz: 0,
-      owner: id, life: isPotato ? 9999 : 220, bounces: 0,
+      owner: id, life: 220, bounces: 0,  // potato rocks despawn same as regular rocks
       isMeteor: false, isPotato
     });
   });
@@ -599,43 +640,24 @@ io.on('connection', (socket) => {
     handleKill(l, lobbyId, id, target);
   });
 
-  socket.on('vote_kick', ({ targetId }) => {
-    if (!lobbyId) return;
-    const l = getLobby(lobbyId);
-    if (!l || !l.players[targetId] || targetId === id) return;
-    if (!voteKickVotes[targetId]) voteKickVotes[targetId] = new Set();
-    voteKickVotes[targetId].add(id);
-    const totalPlayers = Object.keys(l.players).length;
-    const votes = voteKickVotes[targetId].size;
-    const needed = Math.max(1, Math.ceil(totalPlayers / 2));
-    if (votes >= needed) {
-      const targetSocket = io.sockets.sockets.get(targetId);
-      if (targetSocket) {
-        targetSocket.emit('kicked', { msg: 'You were vote-kicked from the lobby.' });
-        targetSocket.disconnect(true);
-      }
-      delete voteKickVotes[targetId];
-    } else {
-      io.to(`lobby_${lobbyId}`).emit('vote_kick_update', {
-        targetId, targetName: l.players[targetId]?.name || 'Unknown', votes, needed
-      });
-    }
-  });
-
   socket.on('disconnect', () => {
     // Release global name claim
     for (const [n, sid] of claimedNames.entries()) {
       if (sid === id) { claimedNames.delete(n); break; }
     }
-    // Clean up vote kick tracking
-    delete voteKickVotes[id];
-    for (const tid in voteKickVotes) {
-      voteKickVotes[tid].delete(id);
-      if (voteKickVotes[tid].size === 0) delete voteKickVotes[tid];
-    }
     if (!lobbyId) return;
     const l = getLobby(lobbyId);
-    if (l) delete l.players[id];
+    if (l) {
+      if (l.isHotPotato && l.players[id]?.hasPotato) {
+        l.potatoHolder = null; l.potatoActive = false; l.potatoStartDelay = 180;
+      }
+      delete l.players[id];
+      // Close private lobby immediately when it becomes empty
+      if (typeof lobbyId === 'string' && privateLobbies[lobbyId] &&
+          Object.keys(privateLobbies[lobbyId].players).length === 0) {
+        delete privateLobbies[lobbyId];
+      }
+    }
     delete usedCodesBySocket[id];
   });
 });
@@ -812,13 +834,13 @@ setInterval(() => {
         if (sameTeam(l, r.owner, pid)) continue; // No friendly fire
         if (p.z > 50) continue; // elevated players safe from ground rocks
         if (Math.hypot(r.x - p.x, r.y - p.y) < PLAYER_R + ROCK_R) {
-          // Hot potato transfer — no damage
+          // Hot potato transfer — no damage, timer keeps counting
           if (r.isPotato) {
             const currentHolder = l.potatoHolder ? l.players[l.potatoHolder] : null;
             if (currentHolder) currentHolder.hasPotato = false;
             p.hasPotato = true;
             l.potatoHolder = pid;
-            l.potatoTimer = POTATO_TIME;
+            // DO NOT reset potatoTimer — it keeps burning
             io.to(`lobby_${lid}`).emit('potato_transferred', { name: p.name });
             return false; // remove potato rock
           }
@@ -875,14 +897,32 @@ app.get('/api/lobbies', (req, res) => {
   res.json(Object.keys(lobbies).map(id => ({ id: parseInt(id), count: playerCount(id), max: MAX_PLAYERS })));
 });
 
-app.post('/api/private/create', (req, res) => {
-  let code;
-  do { code = generateLobbyCode(); } while (privateLobbies[code]);
-  privateLobbies[code] = {
+function buildPrivateLobby(code, mode) {
+  const lobby = {
     id: code, isPrivate: true,
     players: {}, rocks: [], beams: [], rockCounter: 0,
     obstacles: OBSTACLES_1
   };
+  if (mode === 'team') {
+    lobby.isTeamLobby = true;
+    lobby.teamKills = { red: 0, blue: 0 };
+    lobby.roundNumber = 1;
+    lobby.obstacles = OBSTACLES_2;
+  } else if (mode === 'potato') {
+    lobby.isHotPotato = true;
+    lobby.potatoHolder = null;
+    lobby.potatoTimer = 0;
+    lobby.potatoActive = false;
+    lobby.potatoStartDelay = 0;
+    lobby.obstacles = OBSTACLES_3;
+  }
+  return lobby;
+}
+
+app.post('/api/private/create', (req, res) => {
+  let code;
+  do { code = generateLobbyCode(); } while (privateLobbies[code]);
+  privateLobbies[code] = buildPrivateLobby(code, 'ffa');
   setTimeout(() => {
     if (privateLobbies[code] && Object.keys(privateLobbies[code].players).length === 0) {
       delete privateLobbies[code];
@@ -891,26 +931,26 @@ app.post('/api/private/create', (req, res) => {
   res.json({ code });
 });
 
-// Custom private lobby — player chooses the code name
+// Custom private lobby — player chooses the code name and gamemode
 app.post('/api/private/host', (req, res) => {
   const raw = ((req.body && req.body.code) || '').toUpperCase().trim().replace(/[^A-Z0-9]/g, '');
+  const mode = (req.body?.mode || 'ffa').toLowerCase();
   if (!raw || raw.length < 2 || raw.length > 20) {
     return res.json({ ok: false, msg: 'Code must be 2–20 letters or numbers.' });
+  }
+  if (containsBadWord(raw)) {
+    return res.json({ ok: false, msg: 'That code name is not allowed. Choose another.' });
   }
   if (privateLobbies[raw]) {
     return res.json({ ok: false, msg: 'Private code already in use. Choose another.' });
   }
-  privateLobbies[raw] = {
-    id: raw, isPrivate: true,
-    players: {}, rocks: [], beams: [], rockCounter: 0,
-    obstacles: OBSTACLES_1
-  };
+  privateLobbies[raw] = buildPrivateLobby(raw, mode);
   setTimeout(() => {
     if (privateLobbies[raw] && Object.keys(privateLobbies[raw].players).length === 0) {
       delete privateLobbies[raw];
     }
   }, 30 * 60 * 1000);
-  res.json({ ok: true, code: raw });
+  res.json({ ok: true, code: raw, mode });
 });
 
 app.get('/api/private/:code', (req, res) => {

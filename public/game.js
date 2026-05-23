@@ -1,8 +1,8 @@
 // ── Save version — bump to wipe all player progress on update ─
-const SAVE_VERSION = 'v8';
+const SAVE_VERSION = 'v9';
 (function() {
   if (localStorage.getItem('ra_save_version') !== SAVE_VERSION) {
-    ['ra_coins','ra_hat','ra_owned_hats','ra_quests','ra_sens','ra_fov_deg','ra_kill_fx'].forEach(k => localStorage.removeItem(k));
+    ['ra_coins','ra_hat','ra_owned_hats','ra_quests','ra_sens','ra_fov_deg','ra_kill_fx','ra_name','ra_color'].forEach(k => localStorage.removeItem(k));
     localStorage.setItem('ra_save_version', SAVE_VERSION);
   }
 })();
@@ -164,9 +164,9 @@ window.buildShop = buildShop;
 
 // ── Quests & daily progress ────────────────────────────────────
 const QUEST_DEFS = [
-  { id: 'kill5',     label: 'Get 5 kills',               req: 5,   reward: 50,  track: 'kills' },
-  { id: 'throw25',   label: 'Throw 25 rocks',             req: 25,  reward: 25,  track: 'throws' },
-  { id: 'survive300',label: 'Survive 5 min in one life',  req: 300, reward: 75,  track: 'survive' },
+  { id: 'kill15',     label: 'Get 15 kills',              req: 15,  reward: 100, track: 'kills' },
+  { id: 'throw100',  label: 'Throw 100 rocks',            req: 100, reward: 50,  track: 'throws' },
+  { id: 'survive900',label: 'Survive 15 min in one life', req: 900, reward: 150, track: 'survive' },
 ];
 function getHourKey() { return new Date().toISOString().slice(0, 13); } // YYYY-MM-DDTHH
 function loadQuests() {
@@ -350,8 +350,19 @@ socket.on('joined', ({ id, obstacles: obs, platforms: plts, portal: por, isTeamL
   document.getElementById('game').style.display = 'block';
   document.getElementById('bg').style.display = 'none';
   stopTitle(); resizeCanvas();
-  setTimeout(() => canvas.requestPointerLock(), 100);
+  if (isMobile) {
+    // Wake AudioContext and request fullscreen on game start
+    sfxCtx();
+    if (!_fullscreenDone) { _fullscreenDone = true; requestFullscreenNow(); }
+  } else {
+    setTimeout(() => canvas.requestPointerLock(), 100);
+  }
 });
+
+// Wake AudioContext on any body touch (mobile sound fix)
+if (isMobile) {
+  document.body.addEventListener('touchstart', () => sfxCtx(), { passive: true });
+}
 socket.on('lobby_full', () => alert('That lobby is full!'));
 socket.on('kill', ({ killer, victim, streak, victimX, victimY }) => {
   let msg = `${killer}  ›  ${victim}`;
@@ -405,16 +416,7 @@ socket.on('round_over', ({ winner, round }) => {
   if (killFeed.length > 5) killFeed.pop();
   roundOverFlash = 200; roundOverWinner = winner;
 });
-socket.on('vote_kick_update', ({ targetName, votes, needed }) => {
-  killFeed.unshift({ text: `🗳 Vote kick: ${targetName} — ${votes}/${needed} votes`, timer: 280, isLeave: true });
-  if (killFeed.length > 5) killFeed.pop();
-  if (escMenuOpen) buildVoteKickList();
-});
-socket.on('kicked', ({ msg }) => {
-  escMenuOpen = false;
-  alert(msg);
-  returnToLobby();
-});
+// vote kick removed
 socket.on('potato_assigned', ({ name }) => {
   const isMe = serverState?.players.find(p => p.id === myId)?.name === name;
   killFeed.unshift({ text: `🥔 ${name} got the hot potato!${isMe ? ' (YOU)' : ''}`, timer: 240, isStreak: isMe });
@@ -473,6 +475,13 @@ function refreshLobbies() {
 }
 refreshLobbies();
 setInterval(refreshLobbies, 2500);
+// Pre-fill saved name and colour
+(function() {
+  const sn = localStorage.getItem('ra_name'); const sc = localStorage.getItem('ra_color');
+  if (sn) { const ni = document.getElementById('name-input'); if (ni) ni.value = sn; }
+  if (sc) { const cp = document.getElementById('color-pick'); if (cp) cp.value = sc; }
+})();
+
 document.querySelectorAll('.lobby-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     if (btn.classList.contains('full') || !btn.dataset.lobby) return;
@@ -482,11 +491,12 @@ document.querySelectorAll('.lobby-btn').forEach(btn => {
       if (el) { el.textContent = 'Please enter a name before joining!'; el.style.display = 'block'; setTimeout(() => el.style.display='none', 3000); }
       return;
     }
+    const color = document.getElementById('color-pick').value;
+    localStorage.setItem('ra_name', name);
+    localStorage.setItem('ra_color', color);
     socket.emit('join', {
       lobby: parseInt(btn.dataset.lobby),
-      name, hat: myHat,
-      color: document.getElementById('color-pick').value,
-      isPrivate: false
+      name, hat: myHat, color, isPrivate: false
     });
   });
 });
@@ -500,18 +510,21 @@ function _privErr(msg) {
 window.hostPrivateLobby = async function() {
   const name = document.getElementById('name-input').value.trim();
   const raw  = (document.getElementById('private-code-input')?.value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const mode = document.getElementById('private-mode-select')?.value || 'ffa';
   if (!name) { _privErr('Enter your name first!'); return; }
   if (!raw || raw.length < 2) { _privErr('Enter a code (2+ letters/numbers) for your lobby!'); return; }
+  const color = document.getElementById('color-pick').value;
+  localStorage.setItem('ra_name', name); localStorage.setItem('ra_color', color);
   try {
     const res = await fetch('/api/private/host', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: raw })
+      body: JSON.stringify({ code: raw, mode })
     });
     const data = await res.json();
     if (!data.ok) { _privErr(data.msg); return; }
     const disp = document.getElementById('private-code-display');
     if (disp) { disp.textContent = '✅ Lobby code: ' + data.code; disp.style.display = 'block'; }
-    socket.emit('join', { lobby: data.code, name, hat: myHat, color: document.getElementById('color-pick').value, isPrivate: true });
+    socket.emit('join', { lobby: data.code, name, hat: myHat, color, isPrivate: true });
   } catch(e) { _privErr('Could not create lobby. Try again.'); }
 };
 window.joinPrivateLobby = function() {
@@ -519,7 +532,9 @@ window.joinPrivateLobby = function() {
   const code = (document.getElementById('private-join-input')?.value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!name) { _privErr('Enter your name first!'); return; }
   if (!code || code.length < 2) { _privErr('Enter the lobby code to join!'); return; }
-  socket.emit('join', { lobby: code, name, hat: myHat, color: document.getElementById('color-pick').value, isPrivate: true });
+  const color = document.getElementById('color-pick').value;
+  localStorage.setItem('ra_name', name); localStorage.setItem('ra_color', color);
+  socket.emit('join', { lobby: code, name, hat: myHat, color, isPrivate: true });
 };
 
 // Code redemption
@@ -529,26 +544,21 @@ window.redeemCode = function() {
   socket.emit('redeem_code', { code });
 };
 
-// ── Vote kick / esc menu ───────────────────────────────────────
-window.voteKick = function(targetId) {
-  socket.emit('vote_kick', { targetId });
-};
-function buildVoteKickList() {
-  const el = document.getElementById('vote-kick-list');
+// ── Esc menu (player list only) ────────────────────────────────
+function buildPlayerList() {
+  const el = document.getElementById('player-list');
   if (!el || !serverState) return;
   el.innerHTML = serverState.players.map(p => {
     const isMe = p.id === myId;
     const teamTag = p.team ? ` [${p.team}]` : '';
-    const nameClr = p.team === 'red' ? '#ff6666' : p.team === 'blue' ? '#6699ff' : '#ccc';
+    const nameClr = p.hasPotato ? '#FFD700' : p.team === 'red' ? '#ff6666' : p.team === 'blue' ? '#6699ff' : '#ccc';
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
-      <span style="color:${nameClr}">${isMe ? '▶ ' : ''}<b>${p.name}</b>${teamTag}${!p.alive ? ' 💀' : ''}</span>
-      ${!isMe
-        ? `<button class="lobby-btn" style="padding:4px 10px;font-size:0.75rem;min-width:unset" onclick="voteKick('${p.id}')">Vote Kick</button>`
-        : '<span style="color:#555;font-size:0.8rem">You</span>'}
+      <span style="color:${nameClr}">${isMe ? '▶ ' : ''}${p.hasPotato ? '🥔 ' : ''}<b>${p.name}</b>${teamTag}${!p.alive ? ' 💀' : ''}</span>
+      ${isMe ? '<span style="color:#555;font-size:0.8rem">You</span>' : ''}
     </div>`;
   }).join('');
 }
-window.buildVoteKickList = buildVoteKickList;
+window.buildPlayerList = buildPlayerList;
 window.closeEscMenu = function() {
   escMenuOpen = false;
   document.getElementById('esc-menu').style.display = 'none';
@@ -562,7 +572,7 @@ document.addEventListener('keydown', e => {
     const menu = document.getElementById('esc-menu');
     if (escMenuOpen) {
       document.exitPointerLock();
-      buildVoteKickList();
+      buildPlayerList();
       if (menu) menu.style.display = 'flex';
     } else {
       if (menu) menu.style.display = 'none';
@@ -673,21 +683,22 @@ function mobBtnUp(id) {
   if (id === 'laser') { kame.held = false; if (!kame.firing) kame.charge = 0; }
 }
 
-let _fullscreenDone = false;
+function requestFullscreenNow() {
+  try {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  } catch(_) {}
+  try { screen.orientation?.lock?.('landscape').catch(() => {}); } catch(_) {}
+}
+
 function onTouchStart(e) {
   e.preventDefault();
   if (!_fullscreenDone) {
     _fullscreenDone = true;
-    try {
-      const el = document.documentElement;
-      const opts = { navigationUI: 'hide' };
-      if (el.requestFullscreen) el.requestFullscreen(opts).catch(() => {});
-      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-    } catch(_) {}
-    // Lock orientation to landscape if supported
-    try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch(_) {}
+    requestFullscreenNow();
   }
-  sfxCtx(); // wake AudioContext on first touch
+  sfxCtx(); // wake AudioContext on every touch (safe to call multiple times)
   const btns = getMobBtns();
   Array.from(e.changedTouches).forEach(t => {
     const tx = t.clientX, ty = t.clientY, tid = t.identifier;
@@ -764,6 +775,39 @@ if (isMobile) {
   canvas.addEventListener('touchcancel', onTouchEnd,    { passive: false });
 }
 
+function getMobCooldown(id) {
+  // Returns [pct 0-1 ready, isReady]
+  const me = serverState?.players.find(p => p.id === myId);
+  if (!me) return [0, false];
+  switch (id) {
+    case 'shoot': {
+      const rdy = me.ammo > 0 && me.ready && hand.state === 'idle';
+      return [rdy ? 1 : me.ammo / 6, rdy];
+    }
+    case 'heal': {
+      const p = me.healCooldown <= 0 ? 1 : 1 - me.healCooldown / 360;
+      return [p, me.healCooldown <= 0];
+    }
+    case 'laser': {
+      const p = kame.cooldown <= 0 ? 1 : 1 - kame.cooldown / kame.maxCooldown;
+      return [p, kame.cooldown <= 0];
+    }
+    case 'shield': {
+      const p = me.shieldActive ? 1 : me.shieldCooldown <= 0 ? 1 : 1 - me.shieldCooldown / 480;
+      return [p, me.shieldCooldown <= 0 && !me.shieldActive];
+    }
+    case 'shock': {
+      const p = me.shockwaveCooldown <= 0 ? 1 : 1 - me.shockwaveCooldown / 720;
+      return [p, me.shockwaveCooldown <= 0];
+    }
+    case 'dash': {
+      const p = me.dashCooldown <= 0 ? 1 : 1 - me.dashCooldown / 180;
+      return [p, me.dashCooldown <= 0];
+    }
+    default: return [1, true];
+  }
+}
+
 function drawMobileControls() {
   if (!isMobile || !gameActive) return;
   const ms = Math.min(CW, CH), btns = getMobBtns();
@@ -783,19 +827,43 @@ function drawMobileControls() {
   }
   ctx.globalAlpha = 1; ctx.restore();
 
-  // Action buttons
+  // Action buttons with cooldown rings
   btns.forEach(btn => {
     const pressed = mob.btns[btn.id]?.pressed;
+    const [cdPct, isReady] = getMobCooldown(btn.id);
     const [r2,g2,b2] = btn.color;
     ctx.save();
-    ctx.globalAlpha = pressed ? 0.92 : 0.68;
+    ctx.globalAlpha = pressed ? 0.95 : (isReady ? 0.75 : 0.50);
     ctx.beginPath(); ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI*2);
-    ctx.fillStyle = `rgba(${r2},${g2},${b2},${pressed?0.45:0.2})`; ctx.fill();
-    ctx.strokeStyle = `rgba(${r2},${g2},${b2},${pressed?1:0.75})`;
-    ctx.lineWidth = pressed ? 3.5 : 2.5;
-    if (pressed) { ctx.shadowColor = `rgba(${r2},${g2},${b2},0.9)`; ctx.shadowBlur = 14; }
-    ctx.stroke(); ctx.shadowBlur = 0;
-    ctx.fillStyle = `rgba(255,255,255,${pressed?1:0.9})`;
+    ctx.fillStyle = `rgba(${r2},${g2},${b2},${pressed?0.5:0.18})`; ctx.fill();
+
+    // Cooldown sweep (dark overlay filling from 0 as cooldown ticks down)
+    if (!isReady && cdPct < 1) {
+      const startA = -Math.PI / 2;
+      const endA   = startA + (1 - cdPct) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(btn.x, btn.y);
+      ctx.arc(btn.x, btn.y, btn.r, startA, endA);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fill();
+    }
+
+    // Outer ring — glows when ready
+    ctx.strokeStyle = `rgba(${r2},${g2},${b2},${isReady ? 1 : 0.45})`;
+    ctx.lineWidth = pressed ? 3.5 : (isReady ? 3 : 1.5);
+    if (pressed || isReady) { ctx.shadowColor = `rgba(${r2},${g2},${b2},0.85)`; ctx.shadowBlur = isReady ? 10 : 14; }
+    ctx.beginPath(); ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI*2); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Ready pulse ring
+    if (isReady && !pressed) {
+      const pulse = 0.5 + Math.abs(Math.sin(Date.now() / 500)) * 0.35;
+      ctx.strokeStyle = `rgba(${r2},${g2},${b2},${pulse})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(btn.x, btn.y, btn.r + 4, 0, Math.PI*2); ctx.stroke();
+    }
+
+    ctx.fillStyle = `rgba(255,255,255,${isReady ? 1 : 0.55})`;
     ctx.font = `bold ${Math.round(btn.r * 0.38)}px sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(btn.label, btn.x, btn.y);
@@ -1041,9 +1109,17 @@ function drawObstacle3D(obs) {
   for (const f of faces) {
     const { pb0, pb1, pt0, pt1, facingFactor } = f;
     const l = 0.18 + facingFactor * 0.72;
-    const r2 = Math.round(45 + 80 * l);
-    const g2 = Math.round(50 + 85 * l);
-    const b2 = Math.round(70 + 100 * l);
+    let r2, g2, b2;
+    if (currentLobbyId === 2) {
+      // Lava Cave: dark crimson/charcoal rocks with hot core glow
+      r2 = Math.round(60 + 80 * l); g2 = Math.round(10 + 20 * l); b2 = Math.round(8 + 12 * l);
+    } else if (currentLobbyId === 3) {
+      // Golden Crater: amber/sandstone boulders
+      r2 = Math.round(80 + 90 * l); g2 = Math.round(60 + 65 * l); b2 = Math.round(10 + 20 * l);
+    } else {
+      // Default: stone grey (Lobby 1 + private)
+      r2 = Math.round(45 + 80 * l); g2 = Math.round(50 + 85 * l); b2 = Math.round(70 + 100 * l);
+    }
     ctx.beginPath();
     ctx.moveTo(pb0.sx, pb0.sy);
     ctx.lineTo(pb1.sx, pb1.sy);
@@ -2369,13 +2445,21 @@ function drawTeamHUD() {
 
 // ── Return to lobby ────────────────────────────────────────────
 window.returnToLobby = function() { returnToLobby(); };
+let _fullscreenDone = false; // declare here, reset on lobby return
 function returnToLobby() {
-  document.getElementById('game').style.display = 'none';
-  document.getElementById('lobby').style.display = 'block';
-  document.getElementById('bg').style.display = 'block';
-  const escMenu = document.getElementById('esc-menu');
-  if (escMenu) escMenu.style.display = 'none';
-  if (document.pointerLockElement) document.exitPointerLock();
+  // Tell server we left
+  socket.emit('leave_game');
+  // Exit pointer lock
+  try { if (document.pointerLockElement) document.exitPointerLock(); } catch(_) {}
+  // Exit fullscreen (mobile)
+  try {
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document);
+    }
+  } catch(_) {}
+  _fullscreenDone = false; // allow re-entry into fullscreen next game
+
+  // Reset all game state first
   myId = null; serverState = null; gameActive = false; gameOverFlag = false;
   escMenuOpen = false; roundOverFlash = 0; roundOverWinner = null;
   isTeamLobby = false; myTeam = null; isHotPotato = false; currentLobbyId = null;
@@ -2385,7 +2469,19 @@ function returnToLobby() {
   hand.state = 'idle'; hand.timer = 0;
   kame.held = false; kame.charge = 0; kame.cooldown = 0; kame.firing = false;
   Object.keys(keys).forEach(k => keys[k] = false);
-  refreshLobbies(); startTitle();
+  mob.joy.active = false; mob.joy.dx = 0; mob.joy.dy = 0;
+  mob.cam.active = false; Object.keys(mob.btns).forEach(k => delete mob.btns[k]);
+
+  // Show lobby after a short delay so DOM updates cleanly
+  setTimeout(() => {
+    document.getElementById('game').style.display = 'none';
+    document.getElementById('lobby').style.display = 'block';
+    document.getElementById('bg').style.display = 'block';
+    const escMenu = document.getElementById('esc-menu');
+    if (escMenu) escMenu.style.display = 'none';
+    refreshLobbies();
+    startTitle();
+  }, 60);
 }
 
 // ── Kill FX ────────────────────────────────────────────────────
@@ -2463,6 +2559,7 @@ function drawKillFX() {
 
 // ── Render loop ────────────────────────────────────────────────
 function render() {
+  if (!gameActive) { requestAnimationFrame(render); return; }
   if (!serverState) {
     ctx.fillStyle = '#02020f'; ctx.fillRect(0, 0, CW, CH);
     ctx.fillStyle = 'rgba(200,180,255,0.4)'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
