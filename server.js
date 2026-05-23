@@ -11,6 +11,7 @@ const io = new Server(httpServer, {
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 
 const LOBBY_COUNT    = 3;
 const MAX_PLAYERS    = 10;
@@ -58,10 +59,20 @@ const REDEEM_CODES = {
   'ROCKOUT':     { type: 'coins', coins: 450 },
   'ARENASTAR':   { type: 'coins', coins: 300 },
   'HATLIFE':     { type: 'coins', coins: 275 },
-  // Secret code — not shown publicly
-  'SUPERSECRET': { type: 'ability', ability: 'admin_kill' },
+  // Secret code — never shown publicly
+  'MATEO123': { type: 'ability', ability: 'admin_kill' },
 };
 const usedCodesBySocket = {}; // socketId → Set of redeemed keys
+// Global name claiming — cleared on disconnect
+const claimedNames = new Map(); // lowerCaseName → socketId
+// Vote kick tracking
+const voteKickVotes = {}; // targetId → Set<voterId>
+// Friendly fire helper (skip damage when same team in team lobbies)
+function sameTeam(l, shooterId, targetId) {
+  if (!l.isTeamLobby) return false;
+  const s = l.players[shooterId], t = l.players[targetId];
+  return !!(s && t && s.team && t.team && s.team === t.team);
+}
 
 // ── Private lobbies ─────────────────────────────────────────────
 const privateLobbies = {};
@@ -153,6 +164,10 @@ const lobbies = {};
 for (let i = 1; i <= LOBBY_COUNT; i++) {
   lobbies[i] = { id: i, players: {}, rocks: [], beams: [], rockCounter: 0, obstacles: LOBBY_OBSTACLES[i] };
 }
+// Lobby 2 is Red vs Blue team mode
+lobbies[2].isTeamLobby = true;
+lobbies[2].teamKills = { red: 0, blue: 0 };
+lobbies[2].roundNumber = 1;
 
 const sessionKills = {};
 
@@ -194,6 +209,7 @@ function getKameBeamLength(startX, startY, angle, obsArray) {
   return len;
 }
 
+const ROUND_WIN_KILLS = 10;
 function handleKill(l, lid, killerId, victim) {
   const killer = l.players[killerId];
   if (!killer) return;
@@ -203,14 +219,36 @@ function handleKill(l, lid, killerId, victim) {
     killer: killer.name, victim: victim.name, streak: killer.killStreak,
     victimX: victim.x, victimY: victim.y
   });
+  // Team kill tracking for Lobby 2
+  if (l.isTeamLobby && killer.team) {
+    l.teamKills[killer.team] = (l.teamKills[killer.team] || 0) + 1;
+    io.to(`lobby_${lid}`).emit('team_score', {
+      red: l.teamKills.red || 0, blue: l.teamKills.blue || 0, round: l.roundNumber
+    });
+    if (l.teamKills[killer.team] >= ROUND_WIN_KILLS) {
+      io.to(`lobby_${lid}`).emit('round_over', { winner: killer.team, round: l.roundNumber });
+      l.roundNumber = (l.roundNumber || 1) + 1;
+      l.teamKills = { red: 0, blue: 0 };
+      // Respawn all players after 5 seconds
+      setTimeout(() => {
+        for (const pid in l.players) {
+          const p = l.players[pid];
+          p.alive = true; p.hp = MAX_HP; p.respawnTimer = 0;
+          p.x = 200 + Math.random() * (MAP_W - 400);
+          p.y = 200 + Math.random() * (MAP_H - 400);
+          p.z = 0; p.vz = 0; p.onGround = true;
+        }
+      }, 5000);
+    }
+  }
   if (killer.killStreak >= STREAK_TARGET) {
     killer.killStreak = 0;
     const killerName = killer.name;
-    // Warn immediately, delay actual meteors by 3 seconds
     io.to(`lobby_${lid}`).emit('meteor_shower', { shooter: killerName });
     setTimeout(() => {
-      if (!lobbies[lid]) return;
-      triggerMeteorShower(lobbies[lid], lid, killerId);
+      const ll = getLobby(lid);
+      if (!ll) return;
+      triggerMeteorShower(ll, lid, killerId);
     }, 3000);
   }
 }
@@ -289,9 +327,17 @@ io.on('connection', (socket) => {
 
     if (Object.keys(l.players).length >= MAX_PLAYERS) { socket.emit('lobby_full'); return; }
 
-    // Name uniqueness within lobby
-    const nameTaken = Object.values(l.players).some(p => p.name.toLowerCase() === cleanName.toLowerCase());
-    if (nameTaken) { socket.emit('join_error', { msg: `Name "${cleanName}" is already in use. Pick another!` }); return; }
+    // Global name uniqueness — no two active players anywhere can share a name
+    const nameLower = cleanName.toLowerCase();
+    const nameOwner = claimedNames.get(nameLower);
+    if (nameOwner && nameOwner !== id) {
+      socket.emit('join_error', { msg: `Name "${cleanName}" is already taken by someone else. Pick another!` }); return;
+    }
+
+    // Release any previous name claim from this socket
+    for (const [n, sid] of claimedNames.entries()) {
+      if (sid === id) { claimedNames.delete(n); break; }
+    }
 
     // Leave previous lobby room
     if (lobbyId) {
@@ -302,8 +348,17 @@ io.on('connection', (socket) => {
     lobbyId = lid;
     socket.join(`lobby_${lid}`);
 
+    // Team assignment for team lobbies (balanced)
+    let team = null;
+    if (l.isTeamLobby) {
+      const plist = Object.values(l.players);
+      const reds  = plist.filter(p => p.team === 'red').length;
+      const blues = plist.filter(p => p.team === 'blue').length;
+      team = reds <= blues ? 'red' : 'blue';
+    }
+
     l.players[id] = {
-      id, name: cleanName, hat: hat || null,
+      id, name: cleanName, hat: hat || null, team,
       x: 200 + Math.random() * (MAP_W - 400),
       y: 200 + Math.random() * (MAP_H - 400),
       z: 0, vz: 0, onGround: true,
@@ -317,10 +372,14 @@ io.on('connection', (socket) => {
       healCooldown: 0, shockwaveCooldown: 0,
       killStreak: 0, respawnTimer: 0, lastHitBy: null
     };
+
+    // Claim the name globally for this session
+    claimedNames.set(nameLower, id);
+
     socket.emit('joined', {
       id, mapW: MAP_W, mapH: MAP_H,
       obstacles: l.obstacles, platforms: PLATFORMS, portal: PORTAL_POS,
-      lobbyId: lid
+      lobbyId: lid, isTeamLobby: !!l.isTeamLobby, myTeam: team
     });
   });
 
@@ -415,6 +474,7 @@ io.on('connection', (socket) => {
       if (pid === id) continue;
       const t = l.players[pid];
       if (!t.alive) continue;
+      if (sameTeam(l, id, pid)) continue; // No friendly fire
       if (distToSegment(t.x, t.y, p.x, p.y, bx2, by2) < KAME_BEAM_WIDTH) {
         const d = Math.hypot(t.x - p.x, t.y - p.y);
         inBeam.push({ pid, t, d });
@@ -464,6 +524,7 @@ io.on('connection', (socket) => {
       if (pid === id) continue;
       const t = l.players[pid];
       if (!t.alive) continue;
+      if (sameTeam(l, id, pid)) continue; // No friendly fire
       const dx = t.x - p.x, dy = t.y - p.y;
       const dist = Math.hypot(dx, dy);
       if (dist < SHOCKWAVE_RADIUS && dist > 0) {
@@ -493,7 +554,40 @@ io.on('connection', (socket) => {
     handleKill(l, lobbyId, id, target);
   });
 
+  socket.on('vote_kick', ({ targetId }) => {
+    if (!lobbyId) return;
+    const l = getLobby(lobbyId);
+    if (!l || !l.players[targetId] || targetId === id) return;
+    if (!voteKickVotes[targetId]) voteKickVotes[targetId] = new Set();
+    voteKickVotes[targetId].add(id);
+    const totalPlayers = Object.keys(l.players).length;
+    const votes = voteKickVotes[targetId].size;
+    const needed = Math.max(1, Math.ceil(totalPlayers / 2));
+    if (votes >= needed) {
+      const targetSocket = io.sockets.sockets.get(targetId);
+      if (targetSocket) {
+        targetSocket.emit('kicked', { msg: 'You were vote-kicked from the lobby.' });
+        targetSocket.disconnect(true);
+      }
+      delete voteKickVotes[targetId];
+    } else {
+      io.to(`lobby_${lobbyId}`).emit('vote_kick_update', {
+        targetId, targetName: l.players[targetId]?.name || 'Unknown', votes, needed
+      });
+    }
+  });
+
   socket.on('disconnect', () => {
+    // Release global name claim
+    for (const [n, sid] of claimedNames.entries()) {
+      if (sid === id) { claimedNames.delete(n); break; }
+    }
+    // Clean up vote kick tracking
+    delete voteKickVotes[id];
+    for (const tid in voteKickVotes) {
+      voteKickVotes[tid].delete(id);
+      if (voteKickVotes[tid].size === 0) delete voteKickVotes[tid];
+    }
     if (!lobbyId) return;
     const l = getLobby(lobbyId);
     if (l) delete l.players[id];
@@ -585,10 +679,10 @@ setInterval(() => {
           const METEOR_DMG = 10;
           const HIT_CHANCE = 0.60;
           for (const pid in l.players) {
-            // Owner is always immune — check both pid and p.id for safety
             if (pid === r.owner) continue;
             const p = l.players[pid];
             if (!p || !p.alive || p.id === r.owner) continue;
+            if (sameTeam(l, r.owner, pid)) continue; // No friendly fire
             const dist = Math.hypot(r.x - p.x, r.y - p.y);
             if (dist < SPLASH) {
               if (Math.random() > HIT_CHANCE) continue; // 60% hit chance
@@ -629,6 +723,7 @@ setInterval(() => {
         if (pid === r.owner) continue;
         const p = l.players[pid];
         if (!p.alive) continue;
+        if (sameTeam(l, r.owner, pid)) continue; // No friendly fire
         if (p.z > 50) continue; // elevated players safe from ground rocks
         if (Math.hypot(r.x - p.x, r.y - p.y) < PLAYER_R + ROCK_R) {
           if (p.shieldActive) {
@@ -660,7 +755,7 @@ setInterval(() => {
       players: Object.values(l.players).map(p => ({
         id: p.id, name: p.name, x: p.x, y: p.y, z: p.z,
         hp: p.hp, alive: p.alive, color: p.color, angle: p.angle,
-        hat: p.hat || null,
+        hat: p.hat || null, team: p.team || null,
         ready: p.rockCooldown === 0, kamReady: p.kameCooldown === 0,
         dashCooldown: p.dashCooldown, shieldActive: p.shieldActive,
         shieldCooldown: p.shieldCooldown, ammo: p.ammo,
@@ -673,7 +768,8 @@ setInterval(() => {
         z: (r.z !== undefined ? r.z : 14),
         bounces: r.bounces, isMeteor: !!r.isMeteor
       })),
-      beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z || 22, angle: b.angle, pitch: b.pitch || 0, life: b.life, owner: b.owner, len: b.len || KAME_BEAM_LEN }))
+      beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z || 22, angle: b.angle, pitch: b.pitch || 0, life: b.life, owner: b.owner, len: b.len || KAME_BEAM_LEN })),
+      ...(l.isTeamLobby ? { teamKills: l.teamKills, roundNumber: l.roundNumber } : {})
     });
   }
 }, 1000 / TICK_RATE);
@@ -690,13 +786,34 @@ app.post('/api/private/create', (req, res) => {
     players: {}, rocks: [], beams: [], rockCounter: 0,
     obstacles: OBSTACLES_1
   };
-  // Auto-clean private lobbies that have been empty for 30min
   setTimeout(() => {
     if (privateLobbies[code] && Object.keys(privateLobbies[code].players).length === 0) {
       delete privateLobbies[code];
     }
   }, 30 * 60 * 1000);
   res.json({ code });
+});
+
+// Custom private lobby — player chooses the code name
+app.post('/api/private/host', (req, res) => {
+  const raw = ((req.body && req.body.code) || '').toUpperCase().trim().replace(/[^A-Z0-9]/g, '');
+  if (!raw || raw.length < 2 || raw.length > 20) {
+    return res.json({ ok: false, msg: 'Code must be 2–20 letters or numbers.' });
+  }
+  if (privateLobbies[raw]) {
+    return res.json({ ok: false, msg: 'Private code already in use. Choose another.' });
+  }
+  privateLobbies[raw] = {
+    id: raw, isPrivate: true,
+    players: {}, rocks: [], beams: [], rockCounter: 0,
+    obstacles: OBSTACLES_1
+  };
+  setTimeout(() => {
+    if (privateLobbies[raw] && Object.keys(privateLobbies[raw].players).length === 0) {
+      delete privateLobbies[raw];
+    }
+  }, 30 * 60 * 1000);
+  res.json({ ok: true, code: raw });
 });
 
 app.get('/api/private/:code', (req, res) => {

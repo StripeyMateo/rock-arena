@@ -27,6 +27,9 @@
       padding: 32px 44px 28px;
       backdrop-filter: blur(8px);
       min-width: 460px;
+      max-width: 96vw;
+      max-height: 90vh;
+      overflow-y: auto;
       text-align: center;
     }
     #lobby h1 {
@@ -158,53 +161,85 @@
 
     <!-- Private Lobby -->
     <div class="private-section">
-      <div style="color:#888;font-size:0.75rem;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">Private Lobby</div>
-      <div class="private-row">
-        <button class="lobby-btn" style="min-width:unset;padding:10px 16px" onclick="createPrivateLobby()">＋ Create</button>
-        <input id="private-join-input" type="text" placeholder="CODE" maxlength="6" />
-        <button class="lobby-btn" style="min-width:unset;padding:10px 16px" onclick="joinPrivateLobby()">Join →</button>
+      <div style="color:#888;font-size:0.75rem;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px">Private Lobby</div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+        <div class="private-row">
+          <input id="private-code-input" type="text" placeholder="Your code name" maxlength="20"
+            style="padding:9px 12px;font-size:0.9rem;border-radius:8px;border:2px solid rgba(255,165,0,0.35);background:rgba(255,255,255,0.05);color:white;outline:none;width:160px;letter-spacing:2px;text-transform:uppercase" />
+          <button class="lobby-btn" style="min-width:unset;padding:10px 16px" onclick="hostPrivateLobby()">🏠 Host</button>
+        </div>
+        <div class="private-row">
+          <input id="private-join-input" type="text" placeholder="Enter code to join" maxlength="20"
+            style="padding:9px 12px;font-size:0.9rem;border-radius:8px;border:2px solid rgba(255,165,0,0.35);background:rgba(255,255,255,0.05);color:white;outline:none;width:160px;letter-spacing:2px;text-transform:uppercase" />
+          <button class="lobby-btn" style="min-width:unset;padding:10px 16px" onclick="joinPrivateLobby()">Join →</button>
+        </div>
       </div>
       <div id="private-code-display"></div>
     </div>
 
-    <p class="hint">Enter a name before joining &nbsp;·&nbsp; Names must be unique per lobby &nbsp;·&nbsp; Mobile joystick + buttons supported</p>
+    <p class="hint">Enter a name · Names are globally unique · Press Esc in-game to vote kick players · Mobile: touch to play</p>
   </div>
 
   <!-- HOW TO PLAY TAB -->
   <div id="tab-rules" style="display:none">
     <div class="rules-section">
-      <h3>Controls</h3>
+      <h3>Controls — PC</h3>
       <div class="key-row"><span class="key">W A S D</span> Move (relative to where you're looking)</div>
-      <div class="key-row"><span class="key">Mouse</span> Look around / aim (horizontal + vertical) — click to capture mouse</div>
+      <div class="key-row"><span class="key">Mouse</span> Look around / aim — click canvas to capture mouse</div>
       <div class="key-row"><span class="key">Left click</span> Throw a rock (6 ammo max, refills over time)</div>
       <div class="key-row"><span class="key">Space</span> Dash in your movement direction (3s cooldown)</div>
-      <div class="key-row"><span class="key">Q</span> Raise physical shield — deflects rocks back &amp; blocks Laser Beam</div>
+      <div class="key-row"><span class="key">Q</span> Raise shield — deflects rocks &amp; blocks Laser Beam</div>
       <div class="key-row"><span class="key">E</span> Heal — restore 10 HP instantly (6s cooldown)</div>
-      <div class="key-row"><span class="key">R</span> Shockwave — blasts nearby players away from you (no damage, 12s cooldown)</div>
-      <div class="key-row"><span class="key">F</span> Hold to charge Laser Beam — releases after 1.5s, pierces multiple players</div>
+      <div class="key-row"><span class="key">R</span> Shockwave — blast nearby players away (12s cooldown)</div>
+      <div class="key-row"><span class="key">F</span> Hold to charge Laser Beam — fires after 1.5s, pierces players</div>
+      <div class="key-row"><span class="key">Esc</span> Open player list / vote kick menu</div>
     </div>
     <div class="rules-section">
-      <h3>Rules</h3>
+      <h3>Controls — Mobile</h3>
       <ul class="rules-list">
-        <li>Each player starts with 75 HP — game is always ongoing, respawn in 3s after death</li>
-        <li>Each rock hit deals 10 damage; Laser Beam deals 30 and pierces multiple players</li>
-        <li>Rocks bounce off walls and pillars (up to 4 bounces) — gold glow = bounced rock</li>
-        <li>Shield deflects rocks back at the thrower and blocks Laser Beam completely</li>
-        <li>6 ammo max — refills automatically over time</li>
-        <li>Get a 3-kill streak to call a meteor shower (3s warning before impact) — you are immune</li>
-        <li>Walk into the purple portal (top of map) to return to lobby any time</li>
-        <li>Up to 10 players per lobby across 3 always-live lobbies</li>
+        <li>Left side joystick to move; right side swipe to look around</li>
+        <li><b>SHOOT</b> (big red) — throw rock &nbsp;|&nbsp; <b>DASH</b> — bottom right corner</li>
+        <li><b>HEAL</b>, <b>LASER</b>, <b>SHIELD</b>, <b>SHOCK</b> — radial buttons around SHOOT</li>
+        <li>Touch anywhere to go full screen</li>
       </ul>
     </div>
     <div class="rules-section">
-      <h3>Tips</h3>
+      <h3>Lobbies</h3>
       <ul class="rules-list">
-        <li>Grind your kill streak: 3 kills → meteor warning → 3s later fire rains down</li>
-        <li>Shield deflects rocks back — bait an enemy throw then raise your shield</li>
-        <li>Look up/down with the mouse to aim Laser Beam and rocks at different heights</li>
-        <li>Dash to escape tight situations or close gaps fast</li>
-        <li>Compass at the top helps navigate — portal is always to the North</li>
-        <li>The portal shows on the minimap in the bottom-right corner</li>
+        <li><b style="color:orange">Lobby 1</b> — Free for all. Kill everyone, survive as long as you can</li>
+        <li><b style="color:#ff5555">Lobby 2</b> — 🔴 Red vs 🔵 Blue teams. No friendly fire. First team to <b>10 kills</b> wins the round. Names show in team colour</li>
+        <li><b style="color:orange">Lobby 3</b> — Free for all in a ring arena layout</li>
+        <li>Up to 10 players per lobby &nbsp;·&nbsp; Respawn in 3s after death</li>
+        <li>Walk into the purple portal (top of map) to return to lobby</li>
+      </ul>
+    </div>
+    <div class="rules-section">
+      <h3>Private Lobbies</h3>
+      <ul class="rules-list">
+        <li>Type a code name you want → click <b>Host</b>. Share that code with friends</li>
+        <li>Friends type the same code → click <b>Join</b> to enter your lobby</li>
+        <li>If the code is already taken: "Private code already in use" — pick another</li>
+        <li>Max 10 players per private lobby</li>
+      </ul>
+    </div>
+    <div class="rules-section">
+      <h3>Hats &amp; Coins</h3>
+      <ul class="rules-list">
+        <li>Earn coins by completing hourly quests in the <b>Codes</b> tab</li>
+        <li>Redeem codes (found in GitHub Releases) for instant coins</li>
+        <li>Buy and equip hats in the <b>Shop</b> tab — they appear on your character in-game</li>
+        <li>Progress (coins, hats) saves automatically in your browser</li>
+      </ul>
+    </div>
+    <div class="rules-section">
+      <h3>Rules &amp; Tips</h3>
+      <ul class="rules-list">
+        <li>Each rock hit deals 10 damage; Laser Beam deals 30 and pierces multiple players</li>
+        <li>Rocks bounce off walls &amp; pillars (up to 4 bounces) — gold glow = bounced rock</li>
+        <li>Shield deflects rocks back and blocks Laser Beam from the front</li>
+        <li>3-kill streak → meteor shower (3s warning) — you are immune to your own meteors</li>
+        <li>Press <b>Esc</b> to open the player list — vote kick players who cheat or are inappropriate</li>
+        <li>Your name is globally unique — no two players anywhere can share the same name</li>
       </ul>
     </div>
   </div>
@@ -247,7 +282,7 @@
     </div>
     <div class="rules-section">
       <h3>Daily Quests</h3>
-      <p style="color:#888;font-size:0.78rem;margin-bottom:0.8rem">Quests reset every day. Complete them for coins!</p>
+      <p style="color:#888;font-size:0.78rem;margin-bottom:0.8rem">Quests reset every hour. Complete them for coins!</p>
       <div id="quest-list"></div>
     </div>
   </div>
@@ -272,6 +307,11 @@
       </div>
     </div>
     <div class="rules-section">
+      <h3>Vote Kick</h3>
+      <p style="color:#888;font-size:0.78rem;margin-bottom:0.6rem">In-game: press <b style="color:orange">Esc</b> to open the player list and vote kick anyone cheating or being inappropriate. A majority vote closes their tab.</p>
+      <p style="color:#555;font-size:0.72rem">Only works while you are in a game lobby.</p>
+    </div>
+    <div class="rules-section">
       <h3>Session Leaderboard</h3>
       <div id="leaderboard-list" style="color:#888;font-size:0.8rem">Loading...</div>
     </div>
@@ -287,6 +327,19 @@
   <div id="overlay-box">
     <h2 id="overlay-title"></h2>
     <p id="overlay-sub"></p>
+  </div>
+</div>
+
+<!-- In-game Escape menu: player list + vote kick -->
+<div id="esc-menu" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.78);justify-content:center;align-items:center;z-index:50">
+  <div style="background:#0d0d1d;border:2px solid rgba(255,165,0,0.5);border-radius:16px;padding:28px 36px;min-width:320px;max-width:90vw;text-align:center">
+    <h3 style="color:orange;letter-spacing:2px;margin-bottom:1rem;font-family:Impact,fantasy">PLAYERS</h3>
+    <div id="vote-kick-list" style="text-align:left;margin-bottom:1rem;max-height:50vh;overflow-y:auto"></div>
+    <p style="color:#555;font-size:0.72rem;margin-bottom:1rem">A majority vote is needed to kick a player.</p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button class="lobby-btn" style="padding:10px 20px" onclick="closeEscMenu()">Close</button>
+      <button class="lobby-btn" style="padding:10px 20px;border-color:#f44;color:#f44" onclick="returnToLobby()">Leave Game</button>
+    </div>
   </div>
 </div>
 

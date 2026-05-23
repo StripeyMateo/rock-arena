@@ -1,3 +1,12 @@
+// ── Save version — bump to wipe all player progress on update ─
+const SAVE_VERSION = 'v8';
+(function() {
+  if (localStorage.getItem('ra_save_version') !== SAVE_VERSION) {
+    ['ra_coins','ra_hat','ra_owned_hats','ra_quests','ra_sens','ra_fov_deg','ra_kill_fx'].forEach(k => localStorage.removeItem(k));
+    localStorage.setItem('ra_save_version', SAVE_VERSION);
+  }
+})();
+
 // ── Settings (persist via localStorage) ──────────────────────
 // Sensitivity stored as display number (1–9); actual value = display * 0.001
 const _rawSens = parseFloat(localStorage.getItem('ra_sens') || '3');
@@ -72,31 +81,35 @@ window.setKillFX = function(type) {
 
 // ── Hats & Coins ───────────────────────────────────────────────
 const HATS = {
-  crown:     { label: '👑 Crown',          price: 200 },
-  cowboy:    { label: '🤠 Cowboy',          price: 150 },
-  wizard:    { label: '🧙 Wizard',          price: 250 },
-  knight:    { label: '⚔️ Knight Helm',    price: 300 },
-  santa:     { label: '🎅 Santa',           price: 100 },
-  tophat:    { label: '🎩 Top Hat',         price: 180 },
-  party:     { label: '🎉 Party Hat',       price: 80  },
-  halo:      { label: '😇 Halo',            price: 350 },
-  viking:    { label: '🪖 Viking',          price: 280 },
-  pirate:    { label: '🏴‍☠️ Pirate',      price: 220 },
-  beanie:    { label: '🧢 Beanie',          price: 90  },
-  graduation:{ label: '🎓 Graduation',      price: 160 },
-  chef:      { label: '👨‍🍳 Chef',        price: 130 },
-  bucket:    { label: '🪣 Bucket Hat',      price: 110 },
-  baseball:  { label: '⚾ Baseball Cap',    price: 120 },
-  frog:      { label: '🐸 Frog Hat',        price: 175 },
-  devil:     { label: '😈 Devil Horns',     price: 200 },
-  mohawk:    { label: '🌈 Rainbow Mohawk',  price: 240 },
-  space:     { label: '🚀 Space Helmet',    price: 320 },
-  jester:    { label: '🃏 Jester',          price: 265 },
+  crown:     { label: '👑 Crown',          price: 500  },
+  cowboy:    { label: '🤠 Cowboy',          price: 350  },
+  wizard:    { label: '🧙 Wizard',          price: 650  },
+  knight:    { label: '⚔️ Knight Helm',    price: 800  },
+  santa:     { label: '🎅 Santa',           price: 250  },
+  tophat:    { label: '🎩 Top Hat',         price: 450  },
+  party:     { label: '🎉 Party Hat',       price: 200  },
+  halo:      { label: '😇 Halo',            price: 900  },
+  viking:    { label: '🪖 Viking',          price: 700  },
+  pirate:    { label: '🏴‍☠️ Pirate',      price: 550  },
+  beanie:    { label: '🧢 Beanie',          price: 225  },
+  graduation:{ label: '🎓 Graduation',      price: 400  },
+  chef:      { label: '👨‍🍳 Chef',        price: 325  },
+  bucket:    { label: '🪣 Bucket Hat',      price: 275  },
+  baseball:  { label: '⚾ Baseball Cap',    price: 300  },
+  frog:      { label: '🐸 Frog Hat',        price: 425  },
+  devil:     { label: '😈 Devil Horns',     price: 500  },
+  mohawk:    { label: '🌈 Rainbow Mohawk',  price: 600  },
+  space:     { label: '🚀 Space Helmet',    price: 850  },
+  jester:    { label: '🃏 Jester',          price: 650  },
 };
 let myHat      = localStorage.getItem('ra_hat') || null;
 let myCoins    = parseInt(localStorage.getItem('ra_coins') || '0');
 let myOwnedHats = JSON.parse(localStorage.getItem('ra_owned_hats') || '[]');
-let hasAdminKill = false; // set only when code is redeemed this session
+let hasAdminKill = false; // set only when code is redeemed this session — NEVER persisted
+let myTeam = null, isTeamLobby = false;
+let currentTeamKills = { red: 0, blue: 0 }, currentRound = 1;
+let escMenuOpen = false;
+let roundOverFlash = 0, roundOverWinner = null;
 
 function awardCoins(amount) {
   myCoins += amount;
@@ -150,9 +163,9 @@ window.buildShop = buildShop;
 
 // ── Quests & daily progress ────────────────────────────────────
 const QUEST_DEFS = [
-  { id: 'kill3',    label: 'Get 3 kills',          req: 3,  reward: 75,  track: 'kills' },
-  { id: 'throw10',  label: 'Throw 10 rocks',        req: 10, reward: 40,  track: 'throws' },
-  { id: 'survive60',label: 'Survive 60 sec in one life', req: 60, reward: 50, track: 'survive' },
+  { id: 'kill5',     label: 'Get 5 kills',               req: 5,   reward: 50,  track: 'kills' },
+  { id: 'throw25',   label: 'Throw 25 rocks',             req: 25,  reward: 25,  track: 'throws' },
+  { id: 'survive300',label: 'Survive 5 min in one life',  req: 300, reward: 75,  track: 'survive' },
 ];
 function getHourKey() { return new Date().toISOString().slice(0, 13); } // YYYY-MM-DDTHH
 function loadQuests() {
@@ -326,8 +339,10 @@ startTitle();
 // ── Socket ─────────────────────────────────────────────────────
 const socket = io();
 
-socket.on('joined', ({ id, obstacles: obs, platforms: plts, portal: por }) => {
+socket.on('joined', ({ id, obstacles: obs, platforms: plts, portal: por, isTeamLobby: itl, myTeam: mt }) => {
   myId = id; obstacles = obs || []; platforms = plts || []; portal = por || null;
+  isTeamLobby = !!itl; myTeam = mt || null;
+  currentTeamKills = { red: 0, blue: 0 }; currentRound = 1;
   gameActive = true;
   document.getElementById('lobby').style.display = 'none';
   document.getElementById('game').style.display = 'block';
@@ -379,6 +394,25 @@ socket.on('player_left', ({ name }) => {
   killFeed.unshift({ text: `${name} left the arena`, timer: 300, isLeave: true });
   if (killFeed.length > 5) killFeed.pop();
 });
+socket.on('team_score', ({ red, blue, round }) => {
+  currentTeamKills = { red, blue }; currentRound = round;
+});
+socket.on('round_over', ({ winner, round }) => {
+  const label = winner === 'red' ? '🔴 Red Team' : '🔵 Blue Team';
+  killFeed.unshift({ text: `🏆 ${label} wins Round ${round}! New round in 5s…`, timer: 420, isStreak: true });
+  if (killFeed.length > 5) killFeed.pop();
+  roundOverFlash = 200; roundOverWinner = winner;
+});
+socket.on('vote_kick_update', ({ targetName, votes, needed }) => {
+  killFeed.unshift({ text: `🗳 Vote kick: ${targetName} — ${votes}/${needed} votes`, timer: 280, isLeave: true });
+  if (killFeed.length > 5) killFeed.pop();
+  if (escMenuOpen) buildVoteKickList();
+});
+socket.on('kicked', ({ msg }) => {
+  escMenuOpen = false;
+  alert(msg);
+  returnToLobby();
+});
 
 socket.on('state', newState => {
   if (serverState) {
@@ -397,6 +431,7 @@ socket.on('state', newState => {
     newState.players.forEach(p => { p.rx = p.x; p.ry = p.y; p.ra = p.angle; p.rz = p.z; });
   }
   serverState = newState;
+  if (newState.teamKills) { currentTeamKills = newState.teamKills; currentRound = newState.roundNumber || 1; }
   const me = serverState.players.find(p => p.id === myId);
   if (me) {
     prevHP = myHP;
@@ -440,22 +475,33 @@ document.querySelectorAll('.lobby-btn').forEach(btn => {
 });
 
 // Private lobby functions
-window.createPrivateLobby = async function() {
+function _privErr(msg) {
+  const el = document.getElementById('join-error');
+  if (el) { el.textContent = msg; el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 4000); }
+  else alert(msg);
+}
+window.hostPrivateLobby = async function() {
   const name = document.getElementById('name-input').value.trim();
-  if (!name) { alert('Enter your name first!'); return; }
+  const raw  = (document.getElementById('private-code-input')?.value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!name) { _privErr('Enter your name first!'); return; }
+  if (!raw || raw.length < 2) { _privErr('Enter a code (2+ letters/numbers) for your lobby!'); return; }
   try {
-    const res = await fetch('/api/private/create', { method: 'POST' });
-    const { code } = await res.json();
-    document.getElementById('private-code-display').textContent = 'Code: ' + code;
-    document.getElementById('private-code-display').style.display = 'block';
-    socket.emit('join', { lobby: code, name, hat: myHat, color: document.getElementById('color-pick').value, isPrivate: true });
-  } catch(e) { alert('Could not create lobby. Try again.'); }
+    const res = await fetch('/api/private/host', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: raw })
+    });
+    const data = await res.json();
+    if (!data.ok) { _privErr(data.msg); return; }
+    const disp = document.getElementById('private-code-display');
+    if (disp) { disp.textContent = '✅ Lobby code: ' + data.code; disp.style.display = 'block'; }
+    socket.emit('join', { lobby: data.code, name, hat: myHat, color: document.getElementById('color-pick').value, isPrivate: true });
+  } catch(e) { _privErr('Could not create lobby. Try again.'); }
 };
 window.joinPrivateLobby = function() {
   const name = document.getElementById('name-input').value.trim();
-  const code = (document.getElementById('private-join-input')?.value || '').trim().toUpperCase();
-  if (!name) { alert('Enter your name first!'); return; }
-  if (!code || code.length < 4) { alert('Enter a valid lobby code!'); return; }
+  const code = (document.getElementById('private-join-input')?.value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!name) { _privErr('Enter your name first!'); return; }
+  if (!code || code.length < 2) { _privErr('Enter the lobby code to join!'); return; }
   socket.emit('join', { lobby: code, name, hat: myHat, color: document.getElementById('color-pick').value, isPrivate: true });
 };
 
@@ -466,8 +512,47 @@ window.redeemCode = function() {
   socket.emit('redeem_code', { code });
 };
 
+// ── Vote kick / esc menu ───────────────────────────────────────
+window.voteKick = function(targetId) {
+  socket.emit('vote_kick', { targetId });
+};
+function buildVoteKickList() {
+  const el = document.getElementById('vote-kick-list');
+  if (!el || !serverState) return;
+  el.innerHTML = serverState.players.map(p => {
+    const isMe = p.id === myId;
+    const teamTag = p.team ? ` [${p.team}]` : '';
+    const nameClr = p.team === 'red' ? '#ff6666' : p.team === 'blue' ? '#6699ff' : '#ccc';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+      <span style="color:${nameClr}">${isMe ? '▶ ' : ''}<b>${p.name}</b>${teamTag}${!p.alive ? ' 💀' : ''}</span>
+      ${!isMe
+        ? `<button class="lobby-btn" style="padding:4px 10px;font-size:0.75rem;min-width:unset" onclick="voteKick('${p.id}')">Vote Kick</button>`
+        : '<span style="color:#555;font-size:0.8rem">You</span>'}
+    </div>`;
+  }).join('');
+}
+window.buildVoteKickList = buildVoteKickList;
+window.closeEscMenu = function() {
+  escMenuOpen = false;
+  document.getElementById('esc-menu').style.display = 'none';
+  if (!isMobile) setTimeout(() => canvas.requestPointerLock(), 80);
+};
+
 // ── Input ──────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && gameActive) {
+    escMenuOpen = !escMenuOpen;
+    const menu = document.getElementById('esc-menu');
+    if (escMenuOpen) {
+      document.exitPointerLock();
+      buildVoteKickList();
+      if (menu) menu.style.display = 'flex';
+    } else {
+      if (menu) menu.style.display = 'none';
+      setTimeout(() => canvas.requestPointerLock(), 80);
+    }
+    return;
+  }
   if (!gameActive) return;
   if (e.key === 'w' || e.key === 'ArrowUp')    keys.up    = true;
   if (e.key === 's' || e.key === 'ArrowDown')  keys.down  = true;
@@ -566,8 +651,17 @@ function mobBtnUp(id) {
   if (id === 'laser') { kame.held = false; if (!kame.firing) kame.charge = 0; }
 }
 
+let _fullscreenDone = false;
 function onTouchStart(e) {
   e.preventDefault();
+  if (!_fullscreenDone) {
+    _fullscreenDone = true;
+    try {
+      const el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } catch(_) {}
+  }
   sfxCtx(); // wake AudioContext on first touch
   const btns = getMobBtns();
   Array.from(e.changedTouches).forEach(t => {
@@ -806,19 +900,6 @@ function drawSkyAndFloor() {
   hg.addColorStop(1, 'rgba(0,100,160,0)');
   ctx.fillStyle = hg; ctx.fillRect(0, clampedHy - 14, CW, 36);
 
-  // Floor grid — more visible teal lines
-  ctx.save(); ctx.strokeStyle = 'rgba(0,160,180,0.14)'; ctx.lineWidth = 1;
-  for (let i = 0; i <= 16; i++) {
-    const bx = (i / 16) * CW;
-    ctx.beginPath(); ctx.moveTo(bx, CH); ctx.lineTo(CW / 2, clampedHy); ctx.stroke();
-  }
-  for (let d = 30; d <= 800; d += 55) {
-    const sy2 = clampedHy + (EYE_H + camZ) * FOCAL / d;
-    if (sy2 > CH || sy2 < clampedHy) continue;
-    const frac = (sy2 - clampedHy) / (CH - clampedHy);
-    ctx.beginPath(); ctx.moveTo(CW/2 - frac * CW * 0.75, sy2); ctx.lineTo(CW/2 + frac * CW * 0.75, sy2); ctx.stroke();
-  }
-  ctx.restore();
 }
 
 // ── Stone pillar obstacles ─────────────────────────────────────
@@ -1482,15 +1563,18 @@ function drawPlayer3D(p) {
     drawHatOn(p.hat, base.sx, bodyY, R);
   }
 
-  // Name + HP bar
+  // Name + HP bar — pushed up when hat is present to avoid overlap
   const bw = Math.max(30, R * 3.2), bh = Math.max(3, R * 0.28);
-  const bx = base.sx - bw / 2, by2 = bodyY - R - bh - 4;
+  const hatExtra = (p.hat && HATS[p.hat]) ? R * 2.0 : 0;
+  const bx = base.sx - bw / 2, by2 = bodyY - R - bh - 4 - hatExtra;
   ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(bx - 1, by2 - 1, bw + 2, bh + 2);
   const pct = p.hp / 75;
   ctx.fillStyle = pct > 0.5 ? '#4caf50' : pct > 0.25 ? '#ff9800' : '#f44336';
   ctx.fillRect(bx, by2, bw * pct, bh);
   ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(bx, by2, bw, bh);
-  ctx.fillStyle = 'white'; ctx.font = `${Math.max(7, R * 0.58)}px sans-serif`;
+  // Team-colored name tags: bright red/blue for team modes, white otherwise
+  const nameClr = p.team === 'red' ? '#ff4444' : p.team === 'blue' ? '#4488ff' : 'white';
+  ctx.fillStyle = nameClr; ctx.font = `bold ${Math.max(7, R * 0.58)}px sans-serif`;
   ctx.textAlign = 'center'; ctx.fillText(p.name, base.sx, by2 - 2);
 
   ctx.restore();
@@ -1986,7 +2070,8 @@ function drawMinimap() {
     if (!p.alive) return;
     const px2 = mx + p.x * sx, py2 = my + p.y * sy2;
     ctx.beginPath(); ctx.arc(px2, py2, p.id === myId ? 4.5 : 3, 0, Math.PI * 2);
-    ctx.fillStyle = p.id === myId ? 'white' : p.color; ctx.fill();
+    const dotClr = p.id === myId ? 'white' : (p.team === 'red' ? '#ff4444' : p.team === 'blue' ? '#4488ff' : p.color);
+    ctx.fillStyle = dotClr; ctx.fill();
     if (p.id === myId) {
       ctx.save(); ctx.translate(px2, py2); ctx.rotate(p.angle);
       ctx.fillStyle = 'rgba(255,255,255,0.75)';
@@ -2037,13 +2122,57 @@ function drawHitFlash() {
   ctx.fillStyle = eg; ctx.fillRect(0, 0, CW, CH);
 }
 
+// ── Team HUD (Lobby 2) ────────────────────────────────────────
+function drawTeamHUD() {
+  if (!isTeamLobby) return;
+  const red = currentTeamKills.red || 0, blue = currentTeamKills.blue || 0;
+  const W = 260, H = 48, x = CW / 2 - W / 2, y = 38; // below compass
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; roundRect(ctx, x, y, W, H, 10); ctx.fill();
+  // Red side
+  ctx.fillStyle = '#ff4444'; ctx.font = 'bold 22px Impact, fantasy';
+  ctx.textAlign = 'center';
+  ctx.fillText(`🔴 ${red}`, x + W * 0.28, y + 30);
+  // vs
+  ctx.fillStyle = '#aaa'; ctx.font = 'bold 14px sans-serif';
+  ctx.fillText('vs', CW / 2, y + 30);
+  // Blue side
+  ctx.fillStyle = '#4488ff'; ctx.font = 'bold 22px Impact, fantasy';
+  ctx.fillText(`${blue} 🔵`, x + W * 0.72, y + 30);
+  // Round info
+  ctx.fillStyle = '#888'; ctx.font = '10px sans-serif';
+  ctx.fillText(`Round ${currentRound}  —  first to ${10} kills wins`, CW / 2, y + H - 5);
+  ctx.restore();
+  // Round-over flash
+  if (roundOverFlash > 0) {
+    roundOverFlash--;
+    const a = Math.min(1, roundOverFlash / 40);
+    const winClr = roundOverWinner === 'red' ? 'rgba(255,40,40,' : 'rgba(40,100,255,';
+    ctx.save();
+    ctx.fillStyle = winClr + (a * 0.22) + ')'; ctx.fillRect(0, 0, CW, CH);
+    ctx.fillStyle = roundOverWinner === 'red' ? `rgba(255,80,80,${a})` : `rgba(80,140,255,${a})`;
+    ctx.font = 'bold 56px Impact, fantasy'; ctx.textAlign = 'center';
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 28;
+    const label = roundOverWinner === 'red' ? '🔴 RED WINS!' : '🔵 BLUE WINS!';
+    ctx.fillText(label, CW / 2, CH / 2 - 14);
+    ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.font = 'bold 20px sans-serif'; ctx.shadowBlur = 0;
+    ctx.fillText('New round starting in 5 seconds…', CW / 2, CH / 2 + 28);
+    ctx.restore();
+  }
+}
+
 // ── Return to lobby ────────────────────────────────────────────
+window.returnToLobby = function() { returnToLobby(); };
 function returnToLobby() {
   document.getElementById('game').style.display = 'none';
   document.getElementById('lobby').style.display = 'block';
   document.getElementById('bg').style.display = 'block';
+  const escMenu = document.getElementById('esc-menu');
+  if (escMenu) escMenu.style.display = 'none';
   if (document.pointerLockElement) document.exitPointerLock();
   myId = null; serverState = null; gameActive = false; gameOverFlag = false;
+  escMenuOpen = false; roundOverFlash = 0; roundOverWinner = null;
+  isTeamLobby = false; myTeam = null;
   obstacles = []; platforms = []; portal = null; killFeed.length = 0;
   shieldRaise = 0; hitFlash = 0; meteorShake = 0; meteorWarning = 0;
   killFXParticles.length = 0; surviveStreak = 0; throwCount = 0;
@@ -2184,6 +2313,7 @@ function render() {
   drawKameText();
   drawHand();
   drawHUD();
+  drawTeamHUD();
   drawCompass();
   drawMinimap();
   drawCursor();
