@@ -10,7 +10,14 @@ const io = new Server(httpServer, {
   transports: ['websocket', 'polling']
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve static files — no-cache for HTML so browsers always get the latest version
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+  }
+}));
 app.use(express.json());
 
 const LOBBY_COUNT    = 3;
@@ -45,6 +52,7 @@ const HEAL_COOLDOWN    = 360;  // 6 s
 const SHOCKWAVE_RADIUS = 420;
 const SHOCKWAVE_FORCE  = 68;
 const SHOCKWAVE_COOLDOWN = 720; // 12 s
+const POTATO_TIME = 900; // 15 seconds × 60 ticks/s
 
 // ── Redeem codes ────────────────────────────────────────────────
 const REDEEM_CODES = {
@@ -82,7 +90,7 @@ function generateLobbyCode() {
   for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
   return code;
 }
-function getLobby(lid) { return lobbies[lid] || privateLobbies[lid] || null; }
+function getLobby(lid) { return lobbies[lid] || lobbies[parseInt(lid)] || privateLobbies[lid] || null; }
 
 const PLATFORMS = [
   { x: 480,  y: 390, r: 52, h: 72 },
@@ -91,7 +99,7 @@ const PLATFORMS = [
   { x: 1120, y: 810, r: 52, h: 72 },
 ];
 
-const PORTAL_POS = { x: 800, y: 68, r: 34 };
+const PORTAL_POS = { x: 800, y: 68, r: 50 };
 
 // Lobby 1 — Central Cluster (original layout)
 const OBSTACLES_1 = [
@@ -168,6 +176,12 @@ for (let i = 1; i <= LOBBY_COUNT; i++) {
 lobbies[2].isTeamLobby = true;
 lobbies[2].teamKills = { red: 0, blue: 0 };
 lobbies[2].roundNumber = 1;
+// Lobby 3 is Hot Potato mode
+lobbies[3].isHotPotato = true;
+lobbies[3].potatoHolder = null;
+lobbies[3].potatoTimer = 0;
+lobbies[3].potatoActive = false;
+lobbies[3].potatoStartDelay = 0;
 
 const sessionKills = {};
 
@@ -219,6 +233,27 @@ function handleKill(l, lid, killerId, victim) {
     killer: killer.name, victim: victim.name, streak: killer.killStreak,
     victimX: victim.x, victimY: victim.y
   });
+  // Hot potato transfer: if victim had the potato, pass it to killer
+  if (l.isHotPotato && victim.hasPotato) {
+    victim.hasPotato = false;
+    if (killer.alive) {
+      killer.hasPotato = true;
+      l.potatoHolder = killerId;
+      l.potatoTimer = POTATO_TIME;
+      io.to(`lobby_${lid}`).emit('potato_transferred', { name: killer.name });
+    } else {
+      const alivePlayers = Object.values(l.players).filter(p => p.alive && p.id !== victim.id);
+      if (alivePlayers.length > 0) {
+        const newHolder = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+        newHolder.hasPotato = true;
+        l.potatoHolder = newHolder.id;
+        l.potatoTimer = POTATO_TIME;
+        io.to(`lobby_${lid}`).emit('potato_transferred', { name: newHolder.name });
+      } else {
+        l.potatoActive = false; l.potatoHolder = null; l.potatoStartDelay = 180;
+      }
+    }
+  }
   // Team kill tracking for Lobby 2
   if (l.isTeamLobby && killer.team) {
     l.teamKills[killer.team] = (l.teamKills[killer.team] || 0) + 1;
@@ -370,7 +405,8 @@ io.on('connection', (socket) => {
       shieldActive: false, shieldTimer: 0, shieldCooldown: 0,
       ammo: MAX_AMMO, ammoTimer: 0,
       healCooldown: 0, shockwaveCooldown: 0,
-      killStreak: 0, respawnTimer: 0, lastHitBy: null
+      killStreak: 0, respawnTimer: 0, lastHitBy: null,
+      hasPotato: false
     };
 
     // Claim the name globally for this session
@@ -379,7 +415,8 @@ io.on('connection', (socket) => {
     socket.emit('joined', {
       id, mapW: MAP_W, mapH: MAP_H,
       obstacles: l.obstacles, platforms: PLATFORMS, portal: PORTAL_POS,
-      lobbyId: lid, isTeamLobby: !!l.isTeamLobby, myTeam: team
+      lobbyId: lid, isTeamLobby: !!l.isTeamLobby, myTeam: team,
+      isHotPotato: !!l.isHotPotato
     });
   });
 
@@ -424,21 +461,26 @@ io.on('connection', (socket) => {
     const l = getLobby(lobbyId);
     const p = l?.players[id];
     if (!p || !p.alive || p.rockCooldown > 0 || p.ammo <= 0) return;
+    if (l.isHotPotato && !p.hasPotato) return; // only potato holder can shoot in hot potato
     p.rockCooldown = ROCK_COOLDOWN; p.ammo--;
+    const isPotato = !!l.isHotPotato;
     l.rocks.push({
       id: l.rockCounter++,
       x: p.x + Math.cos(angle) * (PLAYER_R + ROCK_R + 2),
       y: p.y + Math.sin(angle) * (PLAYER_R + ROCK_R + 2),
       vx: Math.cos(angle) * ROCK_SPEED, vy: Math.sin(angle) * ROCK_SPEED,
       z: p.z + 12, vz: 0,
-      owner: id, life: 220, bounces: 0, isMeteor: false
+      owner: id, life: isPotato ? 9999 : 220, bounces: 0,
+      isMeteor: false, isPotato
     });
   });
 
   socket.on('shield', () => {
     if (!lobbyId) return;
-    const p = getLobby(lobbyId)?.players[id];
+    const l = getLobby(lobbyId);
+    const p = l?.players[id];
     if (!p || !p.alive || p.shieldCooldown > 0 || p.shieldActive) return;
+    if (l.isHotPotato) return; // no shield in hot potato
     p.shieldActive = true; p.shieldTimer = SHIELD_DURATION; p.shieldCooldown = SHIELD_COOLDOWN;
   });
 
@@ -463,6 +505,7 @@ io.on('connection', (socket) => {
     const l = getLobby(lobbyId);
     const p = l?.players[id];
     if (!p || !p.alive || p.kameCooldown > 0) return;
+    if (l.isHotPotato) return; // no laser in hot potato
     p.kameCooldown = KAME_COOLDOWN;
     // Beam stops at first wall — find actual endpoint
     const beamLen = getKameBeamLength(p.x, p.y, angle, l.obstacles);
@@ -506,8 +549,10 @@ io.on('connection', (socket) => {
 
   socket.on('heal', () => {
     if (!lobbyId) return;
-    const p = getLobby(lobbyId)?.players[id];
+    const l = getLobby(lobbyId);
+    const p = l?.players[id];
     if (!p || !p.alive || p.healCooldown > 0) return;
+    if (l.isHotPotato) return; // no heal in hot potato
     p.hp = Math.min(MAX_HP, p.hp + HEAL_AMOUNT);
     p.healCooldown = HEAL_COOLDOWN;
     io.to(id).emit('healed', { hp: p.hp });
@@ -661,13 +706,54 @@ setInterval(() => {
 
     portalExits.forEach(pid => {
       const leavingName = l.players[pid]?.name || 'Player';
-      // Remove from socket.io room so they stop receiving this lobby's state
       const leavingSocket = io.sockets.sockets.get(pid);
       if (leavingSocket) leavingSocket.leave(`lobby_${lid}`);
       io.to(pid).emit('portal_exit');
+      // If this player had the potato, clear it
+      if (l.isHotPotato && l.players[pid]?.hasPotato) {
+        l.potatoHolder = null; l.potatoActive = false; l.potatoStartDelay = 180;
+      }
       delete l.players[pid];
       io.to(`lobby_${lid}`).emit('player_left', { name: leavingName });
     });
+
+    // ── Hot Potato game logic ──────────────────────────────────
+    if (l.isHotPotato) {
+      if (!l.potatoActive) {
+        if (l.potatoStartDelay > 0) {
+          l.potatoStartDelay--;
+        } else {
+          const alivePlayers = Object.values(l.players).filter(p => p.alive);
+          if (alivePlayers.length > 0) {
+            const newHolder = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+            l.potatoHolder = newHolder.id;
+            newHolder.hasPotato = true;
+            l.potatoTimer = POTATO_TIME;
+            l.potatoActive = true;
+            io.to(`lobby_${lid}`).emit('potato_assigned', { name: newHolder.name });
+          }
+        }
+      } else {
+        const holder = l.potatoHolder ? l.players[l.potatoHolder] : null;
+        if (!holder || !holder.alive) {
+          if (holder) holder.hasPotato = false;
+          l.potatoHolder = null; l.potatoActive = false; l.potatoStartDelay = 180;
+        } else {
+          l.potatoTimer--;
+          if (l.potatoTimer <= 0) {
+            // 💥 Holder explodes
+            io.to(`lobby_${lid}`).emit('potato_explode', { name: holder.name, x: holder.x, y: holder.y });
+            io.to(`lobby_${lid}`).emit('kill', {
+              killer: '🥔 POTATO', victim: holder.name, streak: 0,
+              victimX: holder.x, victimY: holder.y
+            });
+            holder.hasPotato = false;
+            holder.hp = 0; holder.alive = false; holder.respawnTimer = RESPAWN_TIME;
+            l.potatoHolder = null; l.potatoActive = false; l.potatoStartDelay = 180;
+          }
+        }
+      }
+    }
 
     l.rocks = l.rocks.filter(r => {
       if (r.isMeteor) {
@@ -706,7 +792,7 @@ setInterval(() => {
       if (r.x > MAP_W - ROCK_R) { r.x = MAP_W - ROCK_R; r.vx *= -1; r.bounces++; }
       if (r.y < ROCK_R)         { r.y = ROCK_R;         r.vy *= -1; r.bounces++; }
       if (r.y > MAP_H - ROCK_R) { r.y = MAP_H - ROCK_R; r.vy *= -1; r.bounces++; }
-      if (r.bounces > MAX_BOUNCES) return false;
+      if (!r.isPotato && r.bounces > MAX_BOUNCES) return false;
       for (const obs of l.obstacles) {
         const dx = r.x - obs.x, dy = r.y - obs.y;
         const dist = Math.hypot(dx, dy);
@@ -726,6 +812,16 @@ setInterval(() => {
         if (sameTeam(l, r.owner, pid)) continue; // No friendly fire
         if (p.z > 50) continue; // elevated players safe from ground rocks
         if (Math.hypot(r.x - p.x, r.y - p.y) < PLAYER_R + ROCK_R) {
+          // Hot potato transfer — no damage
+          if (r.isPotato) {
+            const currentHolder = l.potatoHolder ? l.players[l.potatoHolder] : null;
+            if (currentHolder) currentHolder.hasPotato = false;
+            p.hasPotato = true;
+            l.potatoHolder = pid;
+            l.potatoTimer = POTATO_TIME;
+            io.to(`lobby_${lid}`).emit('potato_transferred', { name: p.name });
+            return false; // remove potato rock
+          }
           if (p.shieldActive) {
             // Front-only: rock velocity dot player forward < 0 means rock comes from in front
             const dot = r.vx * Math.cos(p.angle) + r.vy * Math.sin(p.angle);
@@ -755,7 +851,7 @@ setInterval(() => {
       players: Object.values(l.players).map(p => ({
         id: p.id, name: p.name, x: p.x, y: p.y, z: p.z,
         hp: p.hp, alive: p.alive, color: p.color, angle: p.angle,
-        hat: p.hat || null, team: p.team || null,
+        hat: p.hat || null, team: p.team || null, hasPotato: !!p.hasPotato,
         ready: p.rockCooldown === 0, kamReady: p.kameCooldown === 0,
         dashCooldown: p.dashCooldown, shieldActive: p.shieldActive,
         shieldCooldown: p.shieldCooldown, ammo: p.ammo,
@@ -766,10 +862,11 @@ setInterval(() => {
       rocks: l.rocks.map(r => ({
         id: r.id, x: r.x, y: r.y,
         z: (r.z !== undefined ? r.z : 14),
-        bounces: r.bounces, isMeteor: !!r.isMeteor
+        bounces: r.bounces, isMeteor: !!r.isMeteor, isPotato: !!r.isPotato
       })),
       beams: l.beams.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z || 22, angle: b.angle, pitch: b.pitch || 0, life: b.life, owner: b.owner, len: b.len || KAME_BEAM_LEN })),
-      ...(l.isTeamLobby ? { teamKills: l.teamKills, roundNumber: l.roundNumber } : {})
+      ...(l.isTeamLobby ? { teamKills: l.teamKills, roundNumber: l.roundNumber } : {}),
+      ...(l.isHotPotato ? { potatoTimer: l.potatoTimer, potatoActive: l.potatoActive, potatoHolder: l.potatoHolder } : {})
     });
   }
 }, 1000 / TICK_RATE);

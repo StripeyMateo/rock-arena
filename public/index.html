@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Rock Arena</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -13,7 +16,7 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      height: 100vh;
+      height: 100dvh; /* dynamic viewport height — hides browser chrome on mobile */
       overflow: hidden;
     }
     #bg { position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%; }
@@ -24,13 +27,21 @@
       background: rgba(0,0,0,0.6);
       border: 2px solid rgba(255,165,0,0.3);
       border-radius: 20px;
-      padding: 32px 44px 28px;
+      padding: 28px 36px 24px;
       backdrop-filter: blur(8px);
-      min-width: 460px;
-      max-width: 96vw;
-      max-height: 90vh;
+      width: min(500px, 96vw);
+      max-height: 92dvh;
       overflow-y: auto;
       text-align: center;
+    }
+    @media (max-width: 480px) {
+      #lobby { padding: 18px 14px 16px; border-radius: 14px; }
+      #lobby h1 { font-size: 3rem; }
+      .tab-btn { font-size: 0.7rem; padding: 9px 3px; letter-spacing: 0; }
+      .lobby-btn { min-width: 88px; padding: 11px 10px; font-size: 0.82rem; }
+      .inputs-row { flex-direction: column; gap: 8px; }
+      #name-input { width: 100%; }
+      .lobbies { gap: 8px; }
     }
     #lobby h1 {
       font-size: 4.5rem;
@@ -153,9 +164,9 @@
       <input id="color-pick" type="color" value="#ff6600" title="Pick your colour" />
     </div>
     <div class="lobbies">
-      <button class="lobby-btn" data-lobby="1">Lobby 1<br><span class="cnt">?/10</span></button>
-      <button class="lobby-btn" data-lobby="2">Lobby 2<br><span class="cnt">?/10</span></button>
-      <button class="lobby-btn" data-lobby="3">Lobby 3<br><span class="cnt">?/10</span></button>
+      <button class="lobby-btn" data-lobby="1">FFA<br><span class="cnt">?/10</span></button>
+      <button class="lobby-btn" data-lobby="2">Team Duels<br><span class="cnt">?/10</span></button>
+      <button class="lobby-btn" data-lobby="3">Hot Potato 🥔<br><span class="cnt">?/10</span></button>
     </div>
     <div id="join-error"></div>
 
@@ -206,9 +217,9 @@
     <div class="rules-section">
       <h3>Lobbies</h3>
       <ul class="rules-list">
-        <li><b style="color:orange">Lobby 1</b> — Free for all. Kill everyone, survive as long as you can</li>
-        <li><b style="color:#ff5555">Lobby 2</b> — 🔴 Red vs 🔵 Blue teams. No friendly fire. First team to <b>10 kills</b> wins the round. Names show in team colour</li>
-        <li><b style="color:orange">Lobby 3</b> — Free for all in a ring arena layout</li>
+        <li><b style="color:orange">FFA</b> — Free for all. Kill everyone, survive as long as you can</li>
+        <li><b style="color:#ff5555">Team Duels</b> — 🔴 Red vs 🔵 Blue teams. No friendly fire. First team to <b>10 kills</b> wins the round. Names show in team colour</li>
+        <li><b style="color:#FFD700">Hot Potato 🥔</b> — One player has the potato (gold name + aura). Only the holder can shoot. Throw the potato rock to pass it. If the timer runs out… you EXPLODE! Shockwave &amp; dash still work. No shield, heal, or laser.</li>
         <li>Up to 10 players per lobby &nbsp;·&nbsp; Respawn in 3s after death</li>
         <li>Walk into the purple portal (top of map) to return to lobby</li>
       </ul>
@@ -423,6 +434,6 @@
   }
 </script>
 <script src="/socket.io/socket.io.js"></script>
-<script src="game.js"></script>
+<script src="game.js?v=8.1"></script>
 </body>
 </html>

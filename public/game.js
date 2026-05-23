@@ -108,6 +108,7 @@ let myOwnedHats = JSON.parse(localStorage.getItem('ra_owned_hats') || '[]');
 let hasAdminKill = false; // set only when code is redeemed this session — NEVER persisted
 let myTeam = null, isTeamLobby = false;
 let currentTeamKills = { red: 0, blue: 0 }, currentRound = 1;
+let isHotPotato = false, currentLobbyId = null;
 let escMenuOpen = false;
 let roundOverFlash = 0, roundOverWinner = null;
 
@@ -339,9 +340,10 @@ startTitle();
 // ── Socket ─────────────────────────────────────────────────────
 const socket = io();
 
-socket.on('joined', ({ id, obstacles: obs, platforms: plts, portal: por, isTeamLobby: itl, myTeam: mt }) => {
+socket.on('joined', ({ id, obstacles: obs, platforms: plts, portal: por, isTeamLobby: itl, myTeam: mt, isHotPotato: ihp, lobbyId: lid }) => {
   myId = id; obstacles = obs || []; platforms = plts || []; portal = por || null;
   isTeamLobby = !!itl; myTeam = mt || null;
+  isHotPotato = !!ihp; currentLobbyId = lid ?? null;
   currentTeamKills = { red: 0, blue: 0 }; currentRound = 1;
   gameActive = true;
   document.getElementById('lobby').style.display = 'none';
@@ -412,6 +414,21 @@ socket.on('kicked', ({ msg }) => {
   escMenuOpen = false;
   alert(msg);
   returnToLobby();
+});
+socket.on('potato_assigned', ({ name }) => {
+  const isMe = serverState?.players.find(p => p.id === myId)?.name === name;
+  killFeed.unshift({ text: `🥔 ${name} got the hot potato!${isMe ? ' (YOU)' : ''}`, timer: 240, isStreak: isMe });
+  if (killFeed.length > 5) killFeed.pop();
+});
+socket.on('potato_transferred', ({ name }) => {
+  const isMe = serverState?.players.find(p => p.id === myId)?.name === name;
+  killFeed.unshift({ text: `🥔 ${name} caught the potato!${isMe ? ' (YOU)' : ''}`, timer: 200, isStreak: isMe });
+  if (killFeed.length > 5) killFeed.pop();
+});
+socket.on('potato_explode', ({ name }) => {
+  killFeed.unshift({ text: `💥 ${name} EXPLODED with the potato!`, timer: 320, isStreak: true });
+  if (killFeed.length > 5) killFeed.pop();
+  hitFlash = name === serverState?.players.find(p => p.id === myId)?.name ? 1.0 : 0;
 });
 
 socket.on('state', newState => {
@@ -586,6 +603,7 @@ canvas.addEventListener('mousedown', e => {
     // Left click: lock pointer, then throw rock once locked
     if (!pointerLocked) { canvas.requestPointerLock(); return; }
     const me = serverState.players.find(p => p.id === myId);
+    if (isHotPotato && !me?.hasPotato) return; // only holder can shoot
     if (me && me.alive && me.ready && hand.state === 'idle' && myAmmo > 0) {
       hand.state = 'windup'; hand.timer = 0; hand.rockSent = false;
     }
@@ -617,20 +635,21 @@ const mob = {
 
 function getMobBtns() {
   const ms = Math.min(CW, CH);
-  // SHOOT anchor point (big button)
-  const sx = CW - ms * 0.169, sy = CH - ms * 0.190;
-  const br = ms * 0.135; // big button radius
-  const ar = ms * 0.090; // ability button radius
-  const d  = ms * 0.359; // distance from SHOOT center to ability buttons
+  // SHOOT: placed further from corner to avoid overlapping DASH
+  const sx = CW - ms * 0.22, sy = CH - ms * 0.26;
+  const br = ms * 0.12;  // big button radius
+  const ar = ms * 0.080; // ability button radius
+  const d  = ms * 0.330; // distance from SHOOT to ability buttons
   // Ability buttons spread in a radial arc to the upper-left of SHOOT
   const A = [80, 112, 144, 176].map(deg => deg * Math.PI / 180);
+  // DASH sits in the true bottom-right corner, clear of SHOOT
   return [
     { id:'shoot',  label:'SHOOT',  color:[255,80,80],   r:br, x:sx,                          y:sy },
     { id:'heal',   label:'HEAL',   color:[60,220,100],  r:ar, x:sx + d*Math.cos(A[0]),       y:sy - d*Math.sin(A[0]) },
     { id:'laser',  label:'LASER',  color:[80,200,255],  r:ar, x:sx + d*Math.cos(A[1]),       y:sy - d*Math.sin(A[1]) },
     { id:'shield', label:'SHIELD', color:[100,180,255], r:ar, x:sx + d*Math.cos(A[2]),       y:sy - d*Math.sin(A[2]) },
     { id:'shock',  label:'SHOCK',  color:[180,100,255], r:ar, x:sx + d*Math.cos(A[3]),       y:sy - d*Math.sin(A[3]) },
-    { id:'dash',   label:'DASH',   color:[255,200,80],  r:ar, x:CW - ms*0.09,               y:CH - ms*0.09 },
+    { id:'dash',   label:'DASH',   color:[255,200,80],  r:ar, x:CW - ms*0.065,              y:CH - ms*0.065 },
   ];
 }
 
@@ -638,11 +657,14 @@ function mobBtnDown(id) {
   if (!myId || !serverState) return;
   if (id === 'shoot') {
     const me = serverState.players.find(p => p.id === myId);
+    if (isHotPotato && !me?.hasPotato) return; // only holder can shoot in hot potato
     if (me && me.alive && me.ready && hand.state === 'idle' && myAmmo > 0) {
       hand.state = 'windup'; hand.timer = 0; hand.rockSent = false;
     }
-  } else if (id === 'laser') { kame.held = true; }
-  else if (id === 'heal')   { socket.emit('heal'); }
+  } else if (id === 'laser') {
+    if (isHotPotato) return; // no laser in hot potato
+    kame.held = true;
+  } else if (id === 'heal')   { socket.emit('heal'); }
   else if (id === 'shield') { socket.emit('shield'); sfx.shield(); }
   else if (id === 'shock')  { socket.emit('shockwave'); sfx.shockwave(); }
   else if (id === 'dash')   { socket.emit('dash'); sfx.dash(); }
@@ -658,9 +680,12 @@ function onTouchStart(e) {
     _fullscreenDone = true;
     try {
       const el = document.documentElement;
-      if (el.requestFullscreen) el.requestFullscreen();
+      const opts = { navigationUI: 'hide' };
+      if (el.requestFullscreen) el.requestFullscreen(opts).catch(() => {});
       else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
     } catch(_) {}
+    // Lock orientation to landscape if supported
+    try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch(_) {}
   }
   sfxCtx(); // wake AudioContext on first touch
   const btns = getMobBtns();
@@ -798,10 +823,10 @@ setInterval(() => {
     hand.timer++;
     if (hand.state === 'throw' && hand.timer === 4 && !hand.rockSent) {
       hand.rockSent = true; sfx.throw();
-      // Slight aim assist — nudge up to 22% toward nearest on-screen enemy
+      // Aim assist — nudge up to 30% toward nearest on-screen enemy within ~26°
       let throwAngle = worldAngle;
       if (serverState) {
-        let bestDiff = 0.30, closestDiff = null;
+        let bestDiff = 0.45, closestDiff = null;
         serverState.players.forEach(p => {
           if (p.id === myId || !p.alive) return;
           const proj = project(p.rx, p.ry, p.rz || 0);
@@ -812,7 +837,7 @@ setInterval(() => {
           while (diff < -Math.PI) diff += Math.PI * 2;
           if (Math.abs(diff) < bestDiff) { bestDiff = Math.abs(diff); closestDiff = diff; }
         });
-        if (closestDiff !== null) throwAngle = worldAngle + closestDiff * 0.22;
+        if (closestDiff !== null) throwAngle = worldAngle + closestDiff * 0.30;
       }
       socket.emit('throw', { angle: throwAngle });
       // Quest: throw rocks
@@ -857,16 +882,88 @@ function project(wx, wy, wz) {
   return { sx: CW / 2 + xc * sc, sy: CH / 2 - pitchOffset + (eyeZ - wz) * sc, scale: sc, zc };
 }
 
-// ── Space sky & void floor ─────────────────────────────────────
+// ── Sky & floor — theme varies by lobby ───────────────────────
 function drawSkyAndFloor() {
   const hy = CH / 2 - Math.tan(pitchAngle) * FOCAL + camZ * FOCAL / Math.max(1, 200);
   const clampedHy = Math.max(CH * 0.1, Math.min(CH * 0.9, hy));
 
-  // Bright arena sky
+  // ── LOBBY 2: Lava Cave ──────────────────────────────────────
+  if (currentLobbyId === 2) {
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, clampedHy);
+    skyGrad.addColorStop(0, '#100000'); skyGrad.addColorStop(1, '#2d0400');
+    ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, CW, clampedHy);
+    // Lava glow blobs
+    const lav1 = ctx.createRadialGradient(CW*0.3, clampedHy*0.5, 0, CW*0.3, clampedHy*0.5, CW*0.5);
+    lav1.addColorStop(0, 'rgba(200,50,0,0.32)'); lav1.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = lav1; ctx.fillRect(0, 0, CW, clampedHy);
+    const lav2 = ctx.createRadialGradient(CW*0.75, clampedHy*0.7, 0, CW*0.75, clampedHy*0.7, CW*0.38);
+    lav2.addColorStop(0, 'rgba(180,30,0,0.24)'); lav2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = lav2; ctx.fillRect(0, 0, CW, clampedHy);
+    // Ember particles
+    const now2 = Date.now();
+    for (let i = 0; i < 38; i++) {
+      const t2 = ((now2 / 1800 + i * 0.32) % 1);
+      const ex = ((i * 179 + Math.floor(worldAngle * 55) * 43) % (CW * 8) + CW * 8) % (CW * 8) / 8;
+      const ey = clampedHy * (1 - t2 * 0.92);
+      if (ey < 2 || ey > clampedHy) continue;
+      ctx.globalAlpha = Math.min(0.85, t2 * 2.5) * (0.5 + (i % 3) * 0.18);
+      ctx.fillStyle = i % 3 === 0 ? '#ff8800' : '#ff3300';
+      ctx.beginPath(); ctx.arc(ex, ey, i % 4 === 0 ? 2 : 1.3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Lava floor
+    const floor = ctx.createLinearGradient(0, clampedHy, 0, CH);
+    floor.addColorStop(0, '#220400'); floor.addColorStop(1, '#090100');
+    ctx.fillStyle = floor; ctx.fillRect(0, clampedHy, CW, CH - clampedHy);
+    // Horizon lava glow
+    const hg = ctx.createLinearGradient(0, clampedHy - 14, 0, clampedHy + 24);
+    hg.addColorStop(0, 'rgba(255,80,0,0)');
+    hg.addColorStop(0.45, 'rgba(255,55,0,0.36)');
+    hg.addColorStop(1, 'rgba(180,20,0,0)');
+    ctx.fillStyle = hg; ctx.fillRect(0, clampedHy - 14, CW, 38);
+    return;
+  }
+
+  // ── LOBBY 3: Golden Harvest Arena ──────────────────────────
+  if (currentLobbyId === 3) {
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, clampedHy);
+    skyGrad.addColorStop(0, '#1c0800'); skyGrad.addColorStop(0.5, '#3e1800'); skyGrad.addColorStop(1, '#5c2e00');
+    ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, CW, clampedHy);
+    // Golden haze
+    const gld1 = ctx.createRadialGradient(CW*0.5, clampedHy*0.65, 0, CW*0.5, clampedHy*0.65, CW*0.65);
+    gld1.addColorStop(0, 'rgba(255,140,0,0.22)'); gld1.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gld1; ctx.fillRect(0, 0, CW, clampedHy);
+    const gld2 = ctx.createRadialGradient(CW*0.18, clampedHy*0.28, 0, CW*0.18, clampedHy*0.28, CW*0.32);
+    gld2.addColorStop(0, 'rgba(220,90,0,0.18)'); gld2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gld2; ctx.fillRect(0, 0, CW, clampedHy);
+    // Warm floating sparks (like hot potato embers)
+    for (let i = 0; i < 55; i++) {
+      const sx = ((i * 173 + Math.floor(worldAngle * 80) * 37) % (CW * 10) + CW * 10) % (CW * 10) / 10;
+      const sy = (i * 71) % (clampedHy - 4) + 2;
+      const sz = (i % 5 === 0) ? 2 : 1;
+      ctx.globalAlpha = 0.25 + (i % 6) * 0.09;
+      ctx.fillStyle = i % 4 === 0 ? '#FFD700' : i % 4 === 1 ? '#ff8c00' : 'rgba(255,200,80,0.7)';
+      ctx.fillRect(sx, sy, sz, sz);
+    }
+    ctx.globalAlpha = 1;
+    // Amber floor
+    const floor = ctx.createLinearGradient(0, clampedHy, 0, CH);
+    floor.addColorStop(0, '#1c0d00'); floor.addColorStop(1, '#080300');
+    ctx.fillStyle = floor; ctx.fillRect(0, clampedHy, CW, CH - clampedHy);
+    // Golden horizon glow
+    const hg = ctx.createLinearGradient(0, clampedHy - 14, 0, clampedHy + 24);
+    hg.addColorStop(0, 'rgba(255,180,0,0)');
+    hg.addColorStop(0.45, 'rgba(255,160,0,0.30)');
+    hg.addColorStop(1, 'rgba(180,80,0,0)');
+    ctx.fillStyle = hg; ctx.fillRect(0, clampedHy - 14, CW, 38);
+    return;
+  }
+
+  // ── DEFAULT: Deep Space (Lobby 1 + private lobbies) ─────────
   const skyGrad = ctx.createLinearGradient(0, 0, 0, clampedHy);
   skyGrad.addColorStop(0, '#060d22'); skyGrad.addColorStop(1, '#0c1a38');
   ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, CW, clampedHy);
-  // Nebula glow — more vibrant
+  // Nebula glows
   const neb = ctx.createRadialGradient(CW * 0.6, clampedHy * 0.4, 0, CW * 0.6, clampedHy * 0.4, CW * 0.55);
   neb.addColorStop(0, 'rgba(100,30,180,0.28)'); neb.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = neb; ctx.fillRect(0, 0, CW, clampedHy);
@@ -876,8 +973,7 @@ function drawSkyAndFloor() {
   const neb3 = ctx.createRadialGradient(CW * 0.8, clampedHy * 0.2, 0, CW * 0.8, clampedHy * 0.2, CW * 0.3);
   neb3.addColorStop(0, 'rgba(0,140,160,0.18)'); neb3.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = neb3; ctx.fillRect(0, 0, CW, clampedHy);
-
-  // Procedural stars (deterministic based on worldAngle bucket)
+  // Stars
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   for (let i = 0; i < 120; i++) {
     const sx = ((i * 173 + Math.floor(worldAngle * 80) * 37) % (CW * 10) + CW * 10) % (CW * 10) / 10;
@@ -887,19 +983,16 @@ function drawSkyAndFloor() {
     ctx.fillRect(sx, sy, sz, sz);
   }
   ctx.globalAlpha = 1;
-
-  // Arena floor — brighter teal-dark
+  // Dark teal floor
   const floor = ctx.createLinearGradient(0, clampedHy, 0, CH);
   floor.addColorStop(0, '#091820'); floor.addColorStop(1, '#040e14');
   ctx.fillStyle = floor; ctx.fillRect(0, clampedHy, CW, CH - clampedHy);
-
-  // Horizon atmospheric glow — bright teal/purple
+  // Horizon atmospheric glow
   const hg = ctx.createLinearGradient(0, clampedHy - 14, 0, clampedHy + 22);
   hg.addColorStop(0, 'rgba(0,180,200,0)');
   hg.addColorStop(0.5, 'rgba(40,160,220,0.22)');
   hg.addColorStop(1, 'rgba(0,100,160,0)');
   ctx.fillStyle = hg; ctx.fillRect(0, clampedHy - 14, CW, 36);
-
 }
 
 // ── Stone pillar obstacles ─────────────────────────────────────
@@ -1482,6 +1575,24 @@ function drawPlayer3D(p) {
     ctx.fillStyle = `rgba(0,0,0,${alpha})`; ctx.fill();
   }
 
+  // Hot potato golden aura (drawn behind body)
+  if (p.hasPotato) {
+    const pulse = 1 + Math.sin(Date.now() / 210) * 0.18;
+    const auR = R * 1.85 * pulse;
+    const potatoGlow = ctx.createRadialGradient(base.sx, bodyY, R * 0.4, base.sx, bodyY, auR);
+    potatoGlow.addColorStop(0, 'rgba(255,215,0,0.45)');
+    potatoGlow.addColorStop(0.55, 'rgba(255,140,0,0.18)');
+    potatoGlow.addColorStop(1, 'rgba(255,80,0,0)');
+    ctx.save();
+    ctx.beginPath(); ctx.arc(base.sx, bodyY, auR, 0, Math.PI * 2);
+    ctx.fillStyle = potatoGlow; ctx.fill();
+    ctx.strokeStyle = `rgba(255,200,0,${0.5 + Math.sin(Date.now() / 200) * 0.3})`;
+    ctx.lineWidth = Math.max(1.5, sc * 2.5);
+    ctx.shadowColor = 'rgba(255,200,0,0.9)'; ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.arc(base.sx, bodyY, R * 1.15, 0, Math.PI * 2); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.restore();
+  }
+
   // Shield disc — slightly smaller than player body
   if (p.shieldActive) {
     const shX = base.sx - R * 1.6, shY = bodyY - R * 0.05;
@@ -1572,10 +1683,23 @@ function drawPlayer3D(p) {
   ctx.fillStyle = pct > 0.5 ? '#4caf50' : pct > 0.25 ? '#ff9800' : '#f44336';
   ctx.fillRect(bx, by2, bw * pct, bh);
   ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(bx, by2, bw, bh);
-  // Team-colored name tags: bright red/blue for team modes, white otherwise
-  const nameClr = p.team === 'red' ? '#ff4444' : p.team === 'blue' ? '#4488ff' : 'white';
-  ctx.fillStyle = nameClr; ctx.font = `bold ${Math.max(7, R * 0.58)}px sans-serif`;
+  // Name tag — gold for potato holder, team colors otherwise
+  const nameClr = p.hasPotato ? '#FFD700' : p.team === 'red' ? '#ff4444' : p.team === 'blue' ? '#4488ff' : 'white';
+  ctx.fillStyle = nameClr;
+  if (p.hasPotato) { ctx.shadowColor = 'rgba(255,200,0,0.9)'; ctx.shadowBlur = 8; }
+  ctx.font = `bold ${Math.max(7, R * 0.58)}px sans-serif`;
   ctx.textAlign = 'center'; ctx.fillText(p.name, base.sx, by2 - 2);
+  ctx.shadowBlur = 0;
+  // Floating 🥔 above potato holder
+  if (p.hasPotato) {
+    const floatY = Math.sin(Date.now() / 480) * 4;
+    const aboveY = bodyY - R - (p.hat && HATS[p.hat] ? R * 2.6 : R * 1.6) - 8 + floatY;
+    ctx.font = `${Math.max(10, R * 0.95)}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(255,180,0,0.9)'; ctx.shadowBlur = 10;
+    ctx.fillText('🥔', base.sx, aboveY);
+    ctx.shadowBlur = 0; ctx.textBaseline = 'alphabetic';
+  }
 
   ctx.restore();
 }
@@ -1587,7 +1711,22 @@ function drawRock3D(r) {
   if (!pr || pr.zc > 1500) return;
   const rs = Math.max(2, 8 * pr.scale);
   ctx.save();
-  if (r.isMeteor) {
+  if (r.isPotato) {
+    // Glowing golden potato rock — bounces forever
+    const pulse = 1 + Math.sin(Date.now() / 160) * 0.2;
+    ctx.shadowColor = 'rgba(255,200,0,0.95)'; ctx.shadowBlur = 20;
+    ctx.beginPath(); ctx.arc(pr.sx, pr.sy, rs * 1.5 * pulse, 0, Math.PI * 2);
+    const pg = ctx.createRadialGradient(pr.sx - rs*0.3, pr.sy - rs*0.3, 0, pr.sx, pr.sy, rs * 1.5);
+    pg.addColorStop(0, '#fff7a0'); pg.addColorStop(0.5, '#FFD700'); pg.addColorStop(1, '#c87000');
+    ctx.fillStyle = pg; ctx.fill();
+    ctx.shadowBlur = 0;
+    if (rs > 5) {
+      ctx.font = `${Math.max(8, rs * 1.6)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('🥔', pr.sx, pr.sy);
+      ctx.textBaseline = 'alphabetic';
+    }
+  } else if (r.isMeteor) {
     // Fire trail above meteor
     const trailTop = project(r.x, r.y, rz + 40);
     if (trailTop) {
@@ -2122,6 +2261,73 @@ function drawHitFlash() {
   ctx.fillStyle = eg; ctx.fillRect(0, 0, CW, CH);
 }
 
+// ── Hot Potato HUD (Lobby 3) ──────────────────────────────────
+function drawPotatoHUD() {
+  if (!isHotPotato || !serverState) return;
+  const potatoTimer = serverState.potatoTimer || 0;
+  const potatoActive = serverState.potatoActive;
+  const me = serverState.players.find(p => p.id === myId);
+  const myHasPotato = !!me?.hasPotato;
+
+  if (!potatoActive) {
+    ctx.save();
+    const pulse = 1 + Math.sin(Date.now() / 300) * 0.06;
+    ctx.font = `bold ${Math.round(16 * pulse)}px sans-serif`;
+    ctx.fillStyle = 'rgba(255,200,80,0.75)'; ctx.textAlign = 'center';
+    ctx.fillText('🥔 Next round starting…', CW / 2, 58);
+    ctx.restore();
+    return;
+  }
+
+  const timeFrac = Math.max(0, potatoTimer / 900); // 900 = POTATO_TIME
+  const secLeft = Math.ceil(potatoTimer / 60);
+  const isUrgent = potatoTimer < 240; // last 4 seconds
+
+  const cx = CW / 2, cy = 88, r = 26;
+  ctx.save();
+
+  // Background disc
+  ctx.beginPath(); ctx.arc(cx, cy, r + 5, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fill();
+
+  // Countdown ring
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + timeFrac * Math.PI * 2);
+  const ringClr = timeFrac > 0.4 ? '#FFD700' : timeFrac > 0.2 ? '#ff8c00' : '#ff3333';
+  ctx.strokeStyle = ringClr; ctx.lineWidth = 6;
+  if (isUrgent) { ctx.shadowColor = '#ff3333'; ctx.shadowBlur = 14; }
+  ctx.stroke(); ctx.shadowBlur = 0;
+
+  // Timer number
+  ctx.font = `bold ${Math.round(r * 0.72)}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = isUrgent ? '#ff4444' : '#FFD700';
+  ctx.fillText(secLeft > 0 ? secLeft : '!', cx, cy);
+  ctx.textBaseline = 'alphabetic';
+
+  // Potato emoji label
+  ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,200,80,0.7)'; ctx.fillText('🥔 POTATO', cx, cy - r - 8);
+
+  // My status
+  if (myHasPotato) {
+    const pulse2 = 1 + Math.sin(Date.now() / 140) * 0.07;
+    ctx.font = `bold ${Math.round(13 * pulse2)}px sans-serif`;
+    ctx.fillStyle = isUrgent ? '#ff4444' : '#FFD700';
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 10;
+    ctx.fillText('YOU HAVE IT — THROW TO PASS!', cx, cy + r + 18);
+    ctx.shadowBlur = 0;
+  } else {
+    const holder = serverState.players.find(p => p.hasPotato);
+    if (holder) {
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = 'rgba(255,200,120,0.65)';
+      ctx.fillText(holder.name + ' has it', cx, cy + r + 18);
+    }
+  }
+  ctx.restore();
+}
+
 // ── Team HUD (Lobby 2) ────────────────────────────────────────
 function drawTeamHUD() {
   if (!isTeamLobby) return;
@@ -2172,7 +2378,7 @@ function returnToLobby() {
   if (document.pointerLockElement) document.exitPointerLock();
   myId = null; serverState = null; gameActive = false; gameOverFlag = false;
   escMenuOpen = false; roundOverFlash = 0; roundOverWinner = null;
-  isTeamLobby = false; myTeam = null;
+  isTeamLobby = false; myTeam = null; isHotPotato = false; currentLobbyId = null;
   obstacles = []; platforms = []; portal = null; killFeed.length = 0;
   shieldRaise = 0; hitFlash = 0; meteorShake = 0; meteorWarning = 0;
   killFXParticles.length = 0; surviveStreak = 0; throwCount = 0;
@@ -2314,6 +2520,7 @@ function render() {
   drawHand();
   drawHUD();
   drawTeamHUD();
+  drawPotatoHUD();
   drawCompass();
   drawMinimap();
   drawCursor();
