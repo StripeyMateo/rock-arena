@@ -434,6 +434,7 @@ socket.on('potato_explode', ({ name }) => {
 });
 
 socket.on('state', newState => {
+  if (!gameActive) return; // ignore state events after leaving game
   if (serverState) {
     const oldMap = {};
     serverState.players.forEach(p => oldMap[p.id] = p);
@@ -977,84 +978,12 @@ function project(wx, wy, wz) {
   return { sx: CW / 2 + xc * sc, sy: CH / 2 - pitchOffset + (eyeZ - wz) * sc, scale: sc, zc };
 }
 
-// ── Sky & floor — theme varies by lobby ───────────────────────
+// ── Sky & floor — same deep space theme for all lobbies ───────
 function drawSkyAndFloor() {
   const hy = CH / 2 - Math.tan(pitchAngle) * FOCAL + camZ * FOCAL / Math.max(1, 200);
   const clampedHy = Math.max(CH * 0.1, Math.min(CH * 0.9, hy));
 
-  // ── LOBBY 2: Lava Cave ──────────────────────────────────────
-  if (currentLobbyId === 2) {
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, clampedHy);
-    skyGrad.addColorStop(0, '#100000'); skyGrad.addColorStop(1, '#2d0400');
-    ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, CW, clampedHy);
-    // Lava glow blobs
-    const lav1 = ctx.createRadialGradient(CW*0.3, clampedHy*0.5, 0, CW*0.3, clampedHy*0.5, CW*0.5);
-    lav1.addColorStop(0, 'rgba(200,50,0,0.32)'); lav1.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = lav1; ctx.fillRect(0, 0, CW, clampedHy);
-    const lav2 = ctx.createRadialGradient(CW*0.75, clampedHy*0.7, 0, CW*0.75, clampedHy*0.7, CW*0.38);
-    lav2.addColorStop(0, 'rgba(180,30,0,0.24)'); lav2.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = lav2; ctx.fillRect(0, 0, CW, clampedHy);
-    // Ember particles
-    const now2 = Date.now();
-    for (let i = 0; i < 38; i++) {
-      const t2 = ((now2 / 1800 + i * 0.32) % 1);
-      const ex = ((i * 179 + Math.floor(worldAngle * 55) * 43) % (CW * 8) + CW * 8) % (CW * 8) / 8;
-      const ey = clampedHy * (1 - t2 * 0.92);
-      if (ey < 2 || ey > clampedHy) continue;
-      ctx.globalAlpha = Math.min(0.85, t2 * 2.5) * (0.5 + (i % 3) * 0.18);
-      ctx.fillStyle = i % 3 === 0 ? '#ff8800' : '#ff3300';
-      ctx.beginPath(); ctx.arc(ex, ey, i % 4 === 0 ? 2 : 1.3, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-    // Lava floor
-    const floor = ctx.createLinearGradient(0, clampedHy, 0, CH);
-    floor.addColorStop(0, '#220400'); floor.addColorStop(1, '#090100');
-    ctx.fillStyle = floor; ctx.fillRect(0, clampedHy, CW, CH - clampedHy);
-    // Horizon lava glow
-    const hg = ctx.createLinearGradient(0, clampedHy - 14, 0, clampedHy + 24);
-    hg.addColorStop(0, 'rgba(255,80,0,0)');
-    hg.addColorStop(0.45, 'rgba(255,55,0,0.36)');
-    hg.addColorStop(1, 'rgba(180,20,0,0)');
-    ctx.fillStyle = hg; ctx.fillRect(0, clampedHy - 14, CW, 38);
-    return;
-  }
-
-  // ── LOBBY 3: Golden Harvest Arena ──────────────────────────
-  if (currentLobbyId === 3) {
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, clampedHy);
-    skyGrad.addColorStop(0, '#1c0800'); skyGrad.addColorStop(0.5, '#3e1800'); skyGrad.addColorStop(1, '#5c2e00');
-    ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, CW, clampedHy);
-    // Golden haze
-    const gld1 = ctx.createRadialGradient(CW*0.5, clampedHy*0.65, 0, CW*0.5, clampedHy*0.65, CW*0.65);
-    gld1.addColorStop(0, 'rgba(255,140,0,0.22)'); gld1.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = gld1; ctx.fillRect(0, 0, CW, clampedHy);
-    const gld2 = ctx.createRadialGradient(CW*0.18, clampedHy*0.28, 0, CW*0.18, clampedHy*0.28, CW*0.32);
-    gld2.addColorStop(0, 'rgba(220,90,0,0.18)'); gld2.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = gld2; ctx.fillRect(0, 0, CW, clampedHy);
-    // Warm floating sparks (like hot potato embers)
-    for (let i = 0; i < 55; i++) {
-      const sx = ((i * 173 + Math.floor(worldAngle * 80) * 37) % (CW * 10) + CW * 10) % (CW * 10) / 10;
-      const sy = (i * 71) % (clampedHy - 4) + 2;
-      const sz = (i % 5 === 0) ? 2 : 1;
-      ctx.globalAlpha = 0.25 + (i % 6) * 0.09;
-      ctx.fillStyle = i % 4 === 0 ? '#FFD700' : i % 4 === 1 ? '#ff8c00' : 'rgba(255,200,80,0.7)';
-      ctx.fillRect(sx, sy, sz, sz);
-    }
-    ctx.globalAlpha = 1;
-    // Amber floor
-    const floor = ctx.createLinearGradient(0, clampedHy, 0, CH);
-    floor.addColorStop(0, '#1c0d00'); floor.addColorStop(1, '#080300');
-    ctx.fillStyle = floor; ctx.fillRect(0, clampedHy, CW, CH - clampedHy);
-    // Golden horizon glow
-    const hg = ctx.createLinearGradient(0, clampedHy - 14, 0, clampedHy + 24);
-    hg.addColorStop(0, 'rgba(255,180,0,0)');
-    hg.addColorStop(0.45, 'rgba(255,160,0,0.30)');
-    hg.addColorStop(1, 'rgba(180,80,0,0)');
-    ctx.fillStyle = hg; ctx.fillRect(0, clampedHy - 14, CW, 38);
-    return;
-  }
-
-  // ── DEFAULT: Deep Space (Lobby 1 + private lobbies) ─────────
+  // ── Deep Space (all lobbies) ─────────────────────────────────
   const skyGrad = ctx.createLinearGradient(0, 0, 0, clampedHy);
   skyGrad.addColorStop(0, '#060d22'); skyGrad.addColorStop(1, '#0c1a38');
   ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, CW, clampedHy);
@@ -1230,33 +1159,33 @@ const LANTERN_SPOTS = {
 };
 
 function drawLantern3D(wx, wy, lobbyId) {
-  const bobH = 82 + Math.sin(Date.now() / 900 + wx * 0.007) * 6;
-  const top = project(wx, wy, bobH + 14);
+  const bobH = 82 + Math.sin(Date.now() / 1100 + wx * 0.007 + wy * 0.005) * 7;
   const pos = project(wx, wy, bobH);
   const gnd = project(wx, wy, 0);
   if (!pos || pos.zc > 900) return;
 
   // Lobby-specific colour
-  let glowRGB, coreHex, chainHex;
+  let glowRGB, coreHex;
   if (lobbyId === 2) {
-    glowRGB = '255,70,20'; coreHex = '#ff5500'; chainHex = 'rgba(160,80,60,0.55)';
+    glowRGB = '255,80,30'; coreHex = '#ff6622';
   } else if (lobbyId === 3) {
-    glowRGB = '255,200,30'; coreHex = '#ffd700'; chainHex = 'rgba(160,140,40,0.55)';
+    glowRGB = '255,200,40'; coreHex = '#ffd700';
   } else {
-    glowRGB = '120,90,255'; coreHex = '#9966ff'; chainHex = 'rgba(100,80,200,0.55)';
+    glowRGB = '100,80,255'; coreHex = '#8866ff';
   }
   const sc = pos.scale;
   const pulse = 0.88 + Math.sin(Date.now() / 550 + wy * 0.009) * 0.12;
 
   ctx.save();
 
-  // Chain / rod down from top
-  if (top && gnd) {
-    ctx.strokeStyle = chainHex;
-    ctx.lineWidth = Math.max(1, sc * 1.2);
-    ctx.setLineDash([Math.max(2, sc*3), Math.max(2, sc*2)]);
-    ctx.beginPath(); ctx.moveTo(pos.sx, pos.sy); ctx.lineTo(gnd.sx, gnd.sy);
-    ctx.stroke(); ctx.setLineDash([]);
+  // Ground light pool
+  if (gnd && gnd.zc < 600) {
+    const pr = Math.max(4, 28 * gnd.scale * pulse);
+    const grd2 = ctx.createRadialGradient(gnd.sx, gnd.sy, 0, gnd.sx, gnd.sy, pr);
+    grd2.addColorStop(0, `rgba(${glowRGB},0.22)`);
+    grd2.addColorStop(1, `rgba(${glowRGB},0)`);
+    ctx.fillStyle = grd2;
+    ctx.beginPath(); ctx.arc(gnd.sx, gnd.sy, pr, 0, Math.PI * 2); ctx.fill();
   }
 
   // Outer glow halo
@@ -1268,68 +1197,14 @@ function drawLantern3D(wx, wy, lobbyId) {
   ctx.fillStyle = grd;
   ctx.beginPath(); ctx.arc(pos.sx, pos.sy, gr, 0, Math.PI * 2); ctx.fill();
 
-  // Lantern body (small glowing gem/orb)
-  const lr = Math.max(2.5, 7 * sc * pulse);
-  ctx.shadowColor = coreHex; ctx.shadowBlur = Math.max(8, 18 * sc);
-  ctx.fillStyle = coreHex;
+  // Orb core — bright white with coloured shadow glow
+  const lr = Math.max(2, 5 * sc * pulse);
+  ctx.shadowColor = coreHex; ctx.shadowBlur = Math.max(6, 14 * sc);
+  ctx.fillStyle = '#ffffff';
   ctx.beginPath(); ctx.arc(pos.sx, pos.sy, lr, 0, Math.PI * 2); ctx.fill();
-  // Bright core
   ctx.shadowBlur = 0;
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.beginPath(); ctx.arc(pos.sx - lr*0.28, pos.sy - lr*0.28, lr * 0.38, 0, Math.PI * 2); ctx.fill();
 
   ctx.restore();
-}
-
-// ── Floor decals — lobby-specific ground details ────────────────
-function drawFloorDecals() {
-  if (currentLobbyId === 2) {
-    // Lava cracks radiating from center
-    const cracks = [
-      [{x:660,y:600},{x:540,y:480},{x:420,y:420}],
-      [{x:940,y:600},{x:1060,y:480},{x:1180,y:420}],
-      [{x:800,y:500},{x:800,y:350},{x:740,y:260}],
-      [{x:800,y:700},{x:800,y:850},{x:860,y:940}],
-      [{x:700,y:560},{x:580,y:560},{x:450,y:620}],
-      [{x:900,y:640},{x:1020,y:640},{x:1150,y:580}],
-    ];
-    const glow = 0.25 + Math.sin(Date.now() / 700) * 0.12;
-    cracks.forEach(pts => {
-      const proj = pts.map(p => project(p.x, p.y, 0.5)).filter(Boolean);
-      if (proj.length < 2) return;
-      ctx.save();
-      ctx.strokeStyle = `rgba(255,80,0,${glow})`;
-      ctx.lineWidth = Math.max(1, proj[0].scale * 3);
-      ctx.shadowColor = 'rgba(255,60,0,0.8)'; ctx.shadowBlur = 8;
-      ctx.beginPath(); ctx.moveTo(proj[0].sx, proj[0].sy);
-      proj.slice(1).forEach(p => ctx.lineTo(p.sx, p.sy));
-      ctx.stroke(); ctx.restore();
-    });
-  }
-
-  if (currentLobbyId === 3) {
-    // Golden crop circle markings
-    const rings = [180, 320, 460];
-    rings.forEach((r, ri) => {
-      const segs = 24, glow = 0.18 + Math.sin(Date.now() / 900 + ri) * 0.08;
-      ctx.save();
-      ctx.strokeStyle = `rgba(255,200,0,${glow})`;
-      ctx.setLineDash([6, 10]);
-      const pts = [];
-      for (let i = 0; i <= segs; i++) {
-        const a = (i / segs) * Math.PI * 2;
-        const p = project(800 + Math.cos(a) * r, 600 + Math.sin(a) * r, 0.5);
-        if (p) pts.push(p);
-      }
-      if (pts.length > 2) {
-        ctx.lineWidth = Math.max(1, pts[0].scale * 2.5);
-        ctx.beginPath(); ctx.moveTo(pts[0].sx, pts[0].sy);
-        pts.slice(1).forEach(p => ctx.lineTo(p.sx, p.sy));
-        ctx.stroke();
-      }
-      ctx.setLineDash([]); ctx.restore();
-    });
-  }
 }
 
 // ── Portal ─────────────────────────────────────────────────────
@@ -2599,11 +2474,17 @@ function drawTeamHUD() {
 window.returnToLobby = function() { returnToLobby(); };
 let _fullscreenDone = false;
 function returnToLobby() {
-  // 1. Kill render loop and clear canvas immediately — prevents frozen frame
-  gameActive = false;
-  ctx.clearRect(0, 0, CW, CH);
+  if (!gameActive) return; // prevent double-call
 
-  // 2. Swap DOM immediately — no delay
+  // 1. Null out IDs immediately so any in-flight state/socket events are no-ops
+  gameActive = false;
+  myId = null;
+  serverState = null;
+
+  // 2. Wipe canvas — no frozen frame
+  try { ctx.clearRect(0, 0, CW, CH); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, CW, CH); } catch(_) {}
+
+  // 3. Swap DOM right now
   document.getElementById('game').style.display = 'none';
   document.getElementById('lobby').style.display = 'block';
   document.getElementById('bg').style.display = 'block';
@@ -2611,21 +2492,16 @@ function returnToLobby() {
   if (escMenu) escMenu.style.display = 'none';
   escMenuOpen = false;
 
-  // 3. Notify server
+  // 4. Notify server
   socket.emit('leave_game');
 
-  // 4. Release locks
-  try { if (document.pointerLockElement) document.exitPointerLock(); } catch(_) {}
-  try {
-    if (document.fullscreenElement || document.webkitFullscreenElement) {
-      (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document);
-    }
-  } catch(_) {}
+  // 5. Release locks
+  try { document.exitPointerLock?.(); } catch(_) {}
+  try { (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); } catch(_) {}
   _fullscreenDone = false;
 
-  // 5. Reset all game state
-  myId = null; serverState = null; gameOverFlag = false;
-  roundOverFlash = 0; roundOverWinner = null;
+  // 6. Reset remaining state
+  gameOverFlag = false; roundOverFlash = 0; roundOverWinner = null;
   isTeamLobby = false; myTeam = null; isHotPotato = false; currentLobbyId = null;
   obstacles = []; platforms = []; portal = null; killFeed.length = 0;
   shieldRaise = 0; hitFlash = 0; meteorShake = 0; meteorWarning = 0;
@@ -2636,8 +2512,17 @@ function returnToLobby() {
   mob.joy.active = false; mob.joy.dx = 0; mob.joy.dy = 0;
   mob.cam.active = false; Object.keys(mob.btns).forEach(k => delete mob.btns[k]);
 
+  // 7. Restart title — resize bg canvas first so animation draws correctly
+  resizeBg();
   refreshLobbies();
   startTitle();
+
+  // 8. Belt-and-suspenders: ensure lobby is visible after any delayed paints
+  setTimeout(() => {
+    document.getElementById('game').style.display = 'none';
+    document.getElementById('lobby').style.display = 'block';
+    document.getElementById('bg').style.display = 'block';
+  }, 150);
 }
 
 // ── Kill FX ────────────────────────────────────────────────────
@@ -2733,7 +2618,6 @@ function render() {
   }
 
   drawSkyAndFloor();
-  drawFloorDecals();
 
   // Collect & sort far→near
   const objects = [];
