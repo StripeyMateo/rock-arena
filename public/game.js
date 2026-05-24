@@ -567,7 +567,7 @@ window.closeEscMenu = function() {
 
 // ── Input ──────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && gameActive) {
+  if (e.key === 'Escape' && gameActive && !isMobile) {
     escMenuOpen = !escMenuOpen;
     const menu = document.getElementById('esc-menu');
     if (escMenuOpen) {
@@ -702,7 +702,12 @@ function onTouchStart(e) {
   const btns = getMobBtns();
   Array.from(e.changedTouches).forEach(t => {
     const tx = t.clientX, ty = t.clientY, tid = t.identifier;
-    // Check buttons first
+    // Mobile EXIT button (top-left)
+    if (gameActive && checkMobileExitBtn(tx, ty)) {
+      returnToLobby();
+      return;
+    }
+    // Check action buttons
     for (const btn of btns) {
       if (Math.hypot(tx - btn.x, ty - btn.y) < btn.r) {
         mob.btns[btn.id] = { pressed: true, touchId: tid };
@@ -808,6 +813,14 @@ function getMobCooldown(id) {
   }
 }
 
+// Called from onTouchStart to check if the mobile EXIT button was tapped
+function checkMobileExitBtn(tx, ty) {
+  const ms = Math.min(CW, CH);
+  const bw = ms * 0.13, bh = ms * 0.055;
+  const bx = 10, by = 10;
+  return tx >= bx && tx <= bx + bw && ty >= by && ty <= by + bh;
+}
+
 function drawMobileControls() {
   if (!isMobile || !gameActive) return;
   const ms = Math.min(CW, CH), btns = getMobBtns();
@@ -869,6 +882,20 @@ function drawMobileControls() {
     ctx.fillText(btn.label, btn.x, btn.y);
     ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1; ctx.restore();
   });
+
+  // Small EXIT button top-left (replaces ESC menu on mobile)
+  const bw = ms * 0.13, bh = ms * 0.055;
+  ctx.save();
+  ctx.globalAlpha = 0.70;
+  ctx.fillStyle = 'rgba(40,0,0,0.75)';
+  roundRect(ctx, 10, 10, bw, bh, 6); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,80,80,0.7)'; ctx.lineWidth = 1.5;
+  roundRect(ctx, 10, 10, bw, bh, 6); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,120,120,0.95)';
+  ctx.font = `bold ${Math.round(bh * 0.5)}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('✕ EXIT', 10 + bw / 2, 10 + bh / 2);
+  ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1; ctx.restore();
 }
 
 // ── Game tick ──────────────────────────────────────────────────
@@ -1111,13 +1138,13 @@ function drawObstacle3D(obs) {
     const l = 0.18 + facingFactor * 0.72;
     let r2, g2, b2;
     if (currentLobbyId === 2) {
-      // Lava Cave: dark crimson/charcoal rocks with hot core glow
-      r2 = Math.round(60 + 80 * l); g2 = Math.round(10 + 20 * l); b2 = Math.round(8 + 12 * l);
+      // Team Duels: same stone look as lobby 1 but with a warm red tint
+      r2 = Math.round(55 + 88 * l); g2 = Math.round(42 + 72 * l); b2 = Math.round(42 + 72 * l);
     } else if (currentLobbyId === 3) {
-      // Golden Crater: amber/sandstone boulders
-      r2 = Math.round(80 + 90 * l); g2 = Math.round(60 + 65 * l); b2 = Math.round(10 + 20 * l);
+      // Hot Potato: same stone look but with a warm golden/yellow tint
+      r2 = Math.round(55 + 88 * l); g2 = Math.round(52 + 82 * l); b2 = Math.round(30 + 50 * l);
     } else {
-      // Default: stone grey (Lobby 1 + private)
+      // Default: cool blue-grey stone (Lobby 1 + private)
       r2 = Math.round(45 + 80 * l); g2 = Math.round(50 + 85 * l); b2 = Math.round(70 + 100 * l);
     }
     ctx.beginPath();
@@ -1178,6 +1205,131 @@ function drawPlatform3D(plat) {
   ctx.beginPath(); ctx.ellipse(base.sx, base.sy, rw, rh, 0, 0, Math.PI * 2); ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.restore();
+}
+
+// ── Lantern positions per lobby ────────────────────────────────
+const LANTERN_SPOTS = {
+  1: [ // FFA — spaced around the outer ring
+    {x:460, y:130}, {x:1140, y:130},
+    {x:460, y:1070},{x:1140, y:1070},
+    {x:130, y:390}, {x:1470, y:390},
+    {x:130, y:810}, {x:1470, y:810},
+  ],
+  2: [ // Team Duels — marking the two team sides
+    {x:800, y:130}, {x:800, y:1070},
+    {x:130, y:600}, {x:1470, y:600},
+    {x:480, y:600}, {x:1120, y:600},
+    {x:490, y:130}, {x:1110, y:130},
+  ],
+  3: [ // Hot Potato — ringing the golden crater
+    {x:800, y:130}, {x:800, y:1070},
+    {x:130, y:600}, {x:1470, y:600},
+    {x:400, y:200}, {x:1200, y:200},
+    {x:400, y:1000},{x:1200, y:1000},
+  ],
+};
+
+function drawLantern3D(wx, wy, lobbyId) {
+  const bobH = 82 + Math.sin(Date.now() / 900 + wx * 0.007) * 6;
+  const top = project(wx, wy, bobH + 14);
+  const pos = project(wx, wy, bobH);
+  const gnd = project(wx, wy, 0);
+  if (!pos || pos.zc > 900) return;
+
+  // Lobby-specific colour
+  let glowRGB, coreHex, chainHex;
+  if (lobbyId === 2) {
+    glowRGB = '255,70,20'; coreHex = '#ff5500'; chainHex = 'rgba(160,80,60,0.55)';
+  } else if (lobbyId === 3) {
+    glowRGB = '255,200,30'; coreHex = '#ffd700'; chainHex = 'rgba(160,140,40,0.55)';
+  } else {
+    glowRGB = '120,90,255'; coreHex = '#9966ff'; chainHex = 'rgba(100,80,200,0.55)';
+  }
+  const sc = pos.scale;
+  const pulse = 0.88 + Math.sin(Date.now() / 550 + wy * 0.009) * 0.12;
+
+  ctx.save();
+
+  // Chain / rod down from top
+  if (top && gnd) {
+    ctx.strokeStyle = chainHex;
+    ctx.lineWidth = Math.max(1, sc * 1.2);
+    ctx.setLineDash([Math.max(2, sc*3), Math.max(2, sc*2)]);
+    ctx.beginPath(); ctx.moveTo(pos.sx, pos.sy); ctx.lineTo(gnd.sx, gnd.sy);
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // Outer glow halo
+  const gr = Math.max(8, 42 * sc * pulse);
+  const grd = ctx.createRadialGradient(pos.sx, pos.sy, 0, pos.sx, pos.sy, gr);
+  grd.addColorStop(0,   `rgba(${glowRGB},0.55)`);
+  grd.addColorStop(0.45,`rgba(${glowRGB},0.18)`);
+  grd.addColorStop(1,   `rgba(${glowRGB},0)`);
+  ctx.fillStyle = grd;
+  ctx.beginPath(); ctx.arc(pos.sx, pos.sy, gr, 0, Math.PI * 2); ctx.fill();
+
+  // Lantern body (small glowing gem/orb)
+  const lr = Math.max(2.5, 7 * sc * pulse);
+  ctx.shadowColor = coreHex; ctx.shadowBlur = Math.max(8, 18 * sc);
+  ctx.fillStyle = coreHex;
+  ctx.beginPath(); ctx.arc(pos.sx, pos.sy, lr, 0, Math.PI * 2); ctx.fill();
+  // Bright core
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath(); ctx.arc(pos.sx - lr*0.28, pos.sy - lr*0.28, lr * 0.38, 0, Math.PI * 2); ctx.fill();
+
+  ctx.restore();
+}
+
+// ── Floor decals — lobby-specific ground details ────────────────
+function drawFloorDecals() {
+  if (currentLobbyId === 2) {
+    // Lava cracks radiating from center
+    const cracks = [
+      [{x:660,y:600},{x:540,y:480},{x:420,y:420}],
+      [{x:940,y:600},{x:1060,y:480},{x:1180,y:420}],
+      [{x:800,y:500},{x:800,y:350},{x:740,y:260}],
+      [{x:800,y:700},{x:800,y:850},{x:860,y:940}],
+      [{x:700,y:560},{x:580,y:560},{x:450,y:620}],
+      [{x:900,y:640},{x:1020,y:640},{x:1150,y:580}],
+    ];
+    const glow = 0.25 + Math.sin(Date.now() / 700) * 0.12;
+    cracks.forEach(pts => {
+      const proj = pts.map(p => project(p.x, p.y, 0.5)).filter(Boolean);
+      if (proj.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,80,0,${glow})`;
+      ctx.lineWidth = Math.max(1, proj[0].scale * 3);
+      ctx.shadowColor = 'rgba(255,60,0,0.8)'; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.moveTo(proj[0].sx, proj[0].sy);
+      proj.slice(1).forEach(p => ctx.lineTo(p.sx, p.sy));
+      ctx.stroke(); ctx.restore();
+    });
+  }
+
+  if (currentLobbyId === 3) {
+    // Golden crop circle markings
+    const rings = [180, 320, 460];
+    rings.forEach((r, ri) => {
+      const segs = 24, glow = 0.18 + Math.sin(Date.now() / 900 + ri) * 0.08;
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,200,0,${glow})`;
+      ctx.setLineDash([6, 10]);
+      const pts = [];
+      for (let i = 0; i <= segs; i++) {
+        const a = (i / segs) * Math.PI * 2;
+        const p = project(800 + Math.cos(a) * r, 600 + Math.sin(a) * r, 0.5);
+        if (p) pts.push(p);
+      }
+      if (pts.length > 2) {
+        ctx.lineWidth = Math.max(1, pts[0].scale * 2.5);
+        ctx.beginPath(); ctx.moveTo(pts[0].sx, pts[0].sy);
+        pts.slice(1).forEach(p => ctx.lineTo(p.sx, p.sy));
+        ctx.stroke();
+      }
+      ctx.setLineDash([]); ctx.restore();
+    });
+  }
 }
 
 // ── Portal ─────────────────────────────────────────────────────
@@ -2445,23 +2597,35 @@ function drawTeamHUD() {
 
 // ── Return to lobby ────────────────────────────────────────────
 window.returnToLobby = function() { returnToLobby(); };
-let _fullscreenDone = false; // declare here, reset on lobby return
+let _fullscreenDone = false;
 function returnToLobby() {
-  // Tell server we left
+  // 1. Kill render loop and clear canvas immediately — prevents frozen frame
+  gameActive = false;
+  ctx.clearRect(0, 0, CW, CH);
+
+  // 2. Swap DOM immediately — no delay
+  document.getElementById('game').style.display = 'none';
+  document.getElementById('lobby').style.display = 'block';
+  document.getElementById('bg').style.display = 'block';
+  const escMenu = document.getElementById('esc-menu');
+  if (escMenu) escMenu.style.display = 'none';
+  escMenuOpen = false;
+
+  // 3. Notify server
   socket.emit('leave_game');
-  // Exit pointer lock
+
+  // 4. Release locks
   try { if (document.pointerLockElement) document.exitPointerLock(); } catch(_) {}
-  // Exit fullscreen (mobile)
   try {
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document);
     }
   } catch(_) {}
-  _fullscreenDone = false; // allow re-entry into fullscreen next game
+  _fullscreenDone = false;
 
-  // Reset all game state first
-  myId = null; serverState = null; gameActive = false; gameOverFlag = false;
-  escMenuOpen = false; roundOverFlash = 0; roundOverWinner = null;
+  // 5. Reset all game state
+  myId = null; serverState = null; gameOverFlag = false;
+  roundOverFlash = 0; roundOverWinner = null;
   isTeamLobby = false; myTeam = null; isHotPotato = false; currentLobbyId = null;
   obstacles = []; platforms = []; portal = null; killFeed.length = 0;
   shieldRaise = 0; hitFlash = 0; meteorShake = 0; meteorWarning = 0;
@@ -2472,16 +2636,8 @@ function returnToLobby() {
   mob.joy.active = false; mob.joy.dx = 0; mob.joy.dy = 0;
   mob.cam.active = false; Object.keys(mob.btns).forEach(k => delete mob.btns[k]);
 
-  // Show lobby after a short delay so DOM updates cleanly
-  setTimeout(() => {
-    document.getElementById('game').style.display = 'none';
-    document.getElementById('lobby').style.display = 'block';
-    document.getElementById('bg').style.display = 'block';
-    const escMenu = document.getElementById('esc-menu');
-    if (escMenu) escMenu.style.display = 'none';
-    refreshLobbies();
-    startTitle();
-  }, 60);
+  refreshLobbies();
+  startTitle();
 }
 
 // ── Kill FX ────────────────────────────────────────────────────
@@ -2577,6 +2733,7 @@ function render() {
   }
 
   drawSkyAndFloor();
+  drawFloorDecals();
 
   // Collect & sort far→near
   const objects = [];
@@ -2598,12 +2755,21 @@ function render() {
     const pr = project(r.x, r.y, rz);
     if (pr) objects.push({ type: 'rock', d: r, zc: pr.zc });
   });
+  // Add lanterns to depth-sorted list
+  const lid = currentLobbyId || 1;
+  const spots = LANTERN_SPOTS[lid] || LANTERN_SPOTS[1];
+  spots.forEach(s => {
+    const p = project(s.x, s.y, 82);
+    if (p) objects.push({ type: 'lantern', d: s, zc: p.zc });
+  });
+
   objects.sort((a, b) => b.zc - a.zc);
   objects.forEach(o => {
-    if (o.type === 'obs')      drawObstacle3D(o.d);
+    if (o.type === 'obs')         drawObstacle3D(o.d);
     else if (o.type === 'portal') drawPortal3D();
     else if (o.type === 'player') drawPlayer3D(o.d);
     else if (o.type === 'rock')   drawRock3D(o.d);
+    else if (o.type === 'lantern') drawLantern3D(o.d.x, o.d.y, lid);
   });
 
   drawShieldBlockFX();
